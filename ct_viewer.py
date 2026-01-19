@@ -487,6 +487,78 @@ def create_mesh(volume, spacing, preset_name='auto'):
 
     return verts, faces, normals
 
+
+def analyze_mesh_orientation(vertices):
+    """
+    Analyze mesh geometry to determine optimal viewing orientation.
+    Returns rotation angles (in radians) to orient the model with:
+    - Head/top at top of view
+    - Front facing the camera
+
+    Uses bounding box analysis and center-of-mass distribution.
+    """
+    if len(vertices) == 0:
+        return {'rotateX': 0, 'rotateY': 0, 'rotateZ': 0}
+
+    # Reshape vertices if flattened
+    if vertices.ndim == 1:
+        vertices = vertices.reshape(-1, 3)
+
+    # Calculate bounding box
+    min_coords = vertices.min(axis=0)
+    max_coords = vertices.max(axis=0)
+    extents = max_coords - min_coords
+
+    print(f"  Mesh extents: X={extents[0]:.1f}, Y={extents[1]:.1f}, Z={extents[2]:.1f}")
+
+    # In our coordinate system after centering:
+    # - vertices[:,0] = X (axial, head-to-toe)
+    # - vertices[:,1] = Y (coronal, front-to-back)
+    # - vertices[:,2] = Z (sagittal, left-to-right)
+
+    # Calculate center of mass for different portions to detect asymmetry
+    # For a human body/head, the face (nose, chin) creates frontal asymmetry
+
+    # Split mesh into front/back halves based on Y
+    y_mid = (min_coords[1] + max_coords[1]) / 2
+    front_half = vertices[vertices[:, 1] < y_mid]
+    back_half = vertices[vertices[:, 1] >= y_mid]
+
+    # Calculate "density" or vertex count in each half
+    front_count = len(front_half)
+    back_count = len(back_half)
+
+    # For a face/head scan, the front (face) typically has more detail/vertices
+    front_bias = front_count / max(front_count + back_count, 1)
+
+    print(f"  Front/back vertex distribution: {front_bias:.2%} front")
+
+    # Determine if we need to flip Y (rotate 180 around Z)
+    rotate_y = 0
+    if front_bias < 0.45:  # Back-heavy, might need to flip
+        rotate_y = np.pi
+        print("  Model appears back-facing, will rotate 180°")
+
+    # Check vertical orientation
+    x_mid = (min_coords[0] + max_coords[0]) / 2
+    top_half = vertices[vertices[:, 0] > x_mid]
+    bottom_half = vertices[vertices[:, 0] <= x_mid]
+
+    top_count = len(top_half)
+    bottom_count = len(bottom_half)
+    bottom_bias = bottom_count / max(top_count + bottom_count, 1)
+
+    print(f"  Top/bottom vertex distribution: {bottom_bias:.2%} bottom")
+
+    return {
+        'rotateX': 0.0,
+        'rotateY': float(rotate_y),
+        'rotateZ': 0.0,
+        'frontBias': float(front_bias),
+        'bottomBias': float(bottom_bias)
+    }
+
+
 def get_slice_image(volume, axis, index, window_center=0, window_width=1000):
     """Extract 2D slice as base64 PNG."""
     if axis == 'axial':
@@ -1140,6 +1212,7 @@ VIEWER_HTML = '''
         let meshColor = {{ mesh_color }};
         let raycaster, mouse;
         let axialPlane, sagittalPlane, coronalPlane;
+        let planeGroup;  // Group to hold planes with same rotation as mesh
 
         // Preset definitions for window/level
         const presets = {
@@ -1175,6 +1248,12 @@ VIEWER_HTML = '''
             const light2 = new THREE.DirectionalLight(0xffffff, 0.5);
             light2.position.set(-1, -1, -1);
             scene.add(light2);
+
+            // Create plane group with same rotation as mesh
+            // This ensures planes visually align with the rotated mesh
+            planeGroup = new THREE.Group();
+            planeGroup.rotation.x = Math.PI - Math.PI / 6;  // Same as mesh rotation
+            scene.add(planeGroup);
 
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
@@ -1286,48 +1365,62 @@ VIEWER_HTML = '''
         }
 
         function updatePlaneHelpers(axial, coronal, sagittal) {
-            if (axialPlane) scene.remove(axialPlane);
-            if (sagittalPlane) scene.remove(sagittalPlane);
-            if (coronalPlane) scene.remove(coronalPlane);
+            // Remove old planes from the group
+            if (axialPlane) planeGroup.remove(axialPlane);
+            if (sagittalPlane) planeGroup.remove(sagittalPlane);
+            if (coronalPlane) planeGroup.remove(coronalPlane);
 
             if (!volumeShape) return;
+
             const size = 160;  // Larger planes for better visibility
             // Use axis-specific ranges from server (matches mesh scaling)
-            const axialRange = planeRanges[0] * 2;    // Full range for z-axis
-            const coronalRange = planeRanges[1] * 2;  // Full range for y-axis
-            const sagittalRange = planeRanges[2] * 2; // Full range for x-axis
-            const tilt = Math.PI / 6;
+            // planeRanges[0] = axial (volume axis 0) = mesh local X
+            // planeRanges[1] = coronal (volume axis 1) = mesh local Y
+            // planeRanges[2] = sagittal (volume axis 2) = mesh local Z
+            const axialRange = planeRanges[0] * 2;
+            const coronalRange = planeRanges[1] * 2;
+            const sagittalRange = planeRanges[2] * 2;
 
-            // Axial (blue) - horizontal slice through body
-            // After mesh flip (Math.PI - tilt), positions need to be inverted
-            const axialMat = new THREE.MeshBasicMaterial({color: 0x4fc3f7, transparent: true, opacity: 0.2, side: THREE.DoubleSide});
+            // Mesh vertex coordinates from marching_cubes:
+            // - verts[:,0] = X = volume axis 0 (axial, head-to-toe)
+            // - verts[:,1] = Y = volume axis 1 (coronal, front-to-back)
+            // - verts[:,2] = Z = volume axis 2 (sagittal, left-to-right)
+            // Planes are added to planeGroup which has the same rotation as the mesh.
+
+            // Axial (blue) - HORIZONTAL slice dividing top/bottom
+            // Perpendicular to X (mesh local), moves along X
+            const axialMat = new THREE.MeshBasicMaterial({color: 0x4fc3f7, transparent: true, opacity: 0.25, side: THREE.DoubleSide});
             axialPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), axialMat);
-            axialPlane.rotation.x = Math.PI / 2 + tilt;
-            // Map slider 0..max to +half..-half (flipped for correct orientation)
-            const axialPos = (0.5 - axial / Math.max(volumeShape[0] - 1, 1)) * axialRange;
-            axialPlane.position.z = axialPos * Math.cos(tilt);
-            axialPlane.position.y = axialPos * Math.sin(tilt);
-            scene.add(axialPlane);
+            // Rotate to be perpendicular to X axis (in YZ plane)
+            axialPlane.rotation.y = Math.PI / 2;
+            // Map slider: 0 = bottom, max = top
+            const axialPos = (axial / Math.max(volumeShape[0] - 1, 1) - 0.5) * axialRange;
+            axialPlane.position.x = axialPos;
+            planeGroup.add(axialPlane);
 
-            // Sagittal (red) - side slice (left-right)
-            const sagMat = new THREE.MeshBasicMaterial({color: 0xff6b6b, transparent: true, opacity: 0.2, side: THREE.DoubleSide});
+            // Sagittal (red) - VERTICAL slice dividing left/right
+            // Perpendicular to Z (mesh local), moves along Z
+            const sagMat = new THREE.MeshBasicMaterial({color: 0xff6b6b, transparent: true, opacity: 0.25, side: THREE.DoubleSide});
             sagittalPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), sagMat);
-            sagittalPlane.rotation.y = Math.PI / 2;
-            sagittalPlane.rotation.x = tilt;
-            // Map slider 0..max to -half..+half
-            sagittalPlane.position.x = (sagittal / Math.max(volumeShape[2] - 1, 1) - 0.5) * sagittalRange;
-            scene.add(sagittalPlane);
+            // Default PlaneGeometry is in XY plane, perpendicular to Z - no rotation needed
+            // Map slider: 0 = one side, max = other side
+            const sagPos = (sagittal / Math.max(volumeShape[2] - 1, 1) - 0.5) * sagittalRange;
+            sagittalPlane.position.z = sagPos;
+            planeGroup.add(sagittalPlane);
 
-            // Coronal (green) - front/back slice
-            const corMat = new THREE.MeshBasicMaterial({color: 0x6bff6b, transparent: true, opacity: 0.2, side: THREE.DoubleSide});
+            // Coronal (green) - VERTICAL slice dividing front/back
+            // Perpendicular to Y (mesh local), moves along Y
+            const corMat = new THREE.MeshBasicMaterial({color: 0x6bff6b, transparent: true, opacity: 0.25, side: THREE.DoubleSide});
             coronalPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), corMat);
-            coronalPlane.rotation.x = tilt;
-            // Map slider 0..max to +half..-half (flipped for correct orientation)
-            const coronalPos = (0.5 - coronal / Math.max(volumeShape[1] - 1, 1)) * coronalRange;
-            coronalPlane.position.y = coronalPos * Math.cos(tilt);
-            coronalPlane.position.z = -coronalPos * Math.sin(tilt);
-            scene.add(coronalPlane);
+            // Rotate to be perpendicular to Y axis (in XZ plane)
+            coronalPlane.rotation.x = Math.PI / 2;
+            // Map slider: 0 = back, max = front
+            const corPos = (coronal / Math.max(volumeShape[1] - 1, 1) - 0.5) * coronalRange;
+            coronalPlane.position.y = corPos;
+            planeGroup.add(coronalPlane);
         }
+
+        let meshOrientation = null;  // Store for camera positioning
 
         function loadMesh() {
             fetch('/mesh_data')
@@ -1365,9 +1458,23 @@ VIEWER_HTML = '''
 
                     scene.add(mesh);
 
-                    // Set camera to look at center
-                    controls.target.set(0, 0, 0);
-                    controls.update();
+                    // Store orientation data for camera adjustment
+                    meshOrientation = data.orientation || {rotateX: 0, rotateY: 0, rotateZ: 0};
+                    console.log('Mesh orientation analysis:', meshOrientation);
+
+                    // If model appears to be facing away, rotate camera to view from back
+                    if (meshOrientation.rotateY !== 0) {
+                        const distance = 200;
+                        camera.position.set(0, 0, -distance);
+                        camera.up.set(0, 1, 0);
+                        controls.target.set(0, 0, 0);
+                        controls.update();
+                        console.log('Camera repositioned to view front of model');
+                    } else {
+                        // Set camera to look at center
+                        controls.target.set(0, 0, 0);
+                        controls.update();
+                    }
 
                     // Initialize planes and slices
                     const mid = [Math.floor(volumeShape[0]/2), Math.floor(volumeShape[1]/2), Math.floor(volumeShape[2]/2)];
@@ -1517,12 +1624,17 @@ def load_directory():
         # Create mesh with detected preset
         verts, faces, normals = create_mesh(current_volume, current_spacing, preset_name=current_scan_type)
         if verts is not None:
+            # Analyze mesh orientation for auto-positioning
+            print("Analyzing mesh orientation...")
+            orientation = analyze_mesh_orientation(verts)
+
             preset = SCAN_PRESETS.get(current_scan_type, SCAN_PRESETS['auto'])
             current_mesh = {
                 'vertices': verts.flatten().tolist(),
                 'faces': faces.flatten().tolist(),
                 'normals': normals.flatten().tolist(),
-                'color': preset['mesh_color']
+                'color': preset['mesh_color'],
+                'orientation': orientation
             }
         else:
             current_mesh = None
