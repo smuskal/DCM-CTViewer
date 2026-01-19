@@ -1077,6 +1077,8 @@ HTML_TEMPLATE = '''
                 <p style="font-size: 12px; margin: 8px 0;">
                     <b>3D Controls:</b><br>
                     &bull; Left-click + drag: Rotate<br>
+                    &nbsp;&nbsp;- Drag up/down: Rotate around vertical axis<br>
+                    &nbsp;&nbsp;- Drag left/right: Tilt up/down<br>
                     &bull; Right-click + drag: Pan<br>
                     &bull; Scroll wheel: Zoom<br><br>
                     <b>Set Cross-Section Location:</b><br>
@@ -1269,48 +1271,45 @@ HTML_TEMPLATE = '''
         }
 
         function setView(view) {
+            // Use dynamically calculated view positions from mesh orientation analysis
+            // The server analyzes mesh geometry and DICOM metadata to determine
+            // correct camera positions for each anatomical view
             controls.target.set(0, 0, 0);
 
-            // Use dynamic orientation from mesh analysis if available
             if (meshOrientation && meshOrientation.viewPositions && meshOrientation.viewPositions[view]) {
                 const pos = meshOrientation.viewPositions[view];
-                const up = meshOrientation.viewUps[view];
+                const up = meshOrientation.viewUps[view] || [1, 0, 0];
                 camera.position.set(pos[0], pos[1], pos[2]);
                 camera.up.set(up[0], up[1], up[2]);
-                controls.update();
-                highlightButton(view);
-                return;
-            }
-
-            // Fallback to hardcoded positions for standard dental CT orientation
-            const d = 200;
-
-            switch(view) {
-                case 'front':
-                    camera.position.set(0, 0.866 * d, -0.5 * d);
-                    camera.up.set(1, 0, 0);
-                    break;
-                case 'back':
-                    camera.position.set(0, -0.866 * d, 0.5 * d);
-                    camera.up.set(1, 0, 0);
-                    break;
-                case 'left':
-                    camera.position.set(0, 0.5 * d, 0.866 * d);
-                    camera.up.set(1, 0, 0);
-                    break;
-                case 'right':
-                    camera.position.set(0, -0.5 * d, -0.866 * d);
-                    camera.up.set(1, 0, 0);
-                    break;
-                case 'top':
-                    camera.position.set(d, 0, 0);
-                    camera.up.set(0, -0.866, 0.5);
-                    break;
-                case 'bottom':
-                    // Look up at bottom - camera below along -X
-                    camera.position.set(-d, 0, 0);  // (-200, 0, 0)
-                    camera.up.set(0, -0.866, 0.5);
-                    break;
+            } else {
+                // Fallback positions if orientation data not available
+                const d = 200;
+                switch(view) {
+                    case 'front':
+                        camera.position.set(0, 173, -100);
+                        camera.up.set(1, 0, 0);
+                        break;
+                    case 'back':
+                        camera.position.set(0, -173, 100);
+                        camera.up.set(1, 0, 0);
+                        break;
+                    case 'left':
+                        camera.position.set(0, 100, 173);
+                        camera.up.set(1, 0, 0);
+                        break;
+                    case 'right':
+                        camera.position.set(0, -100, -173);
+                        camera.up.set(1, 0, 0);
+                        break;
+                    case 'top':
+                        camera.position.set(d, 0, 0);
+                        camera.up.set(0, -0.866, 0.5);
+                        break;
+                    case 'bottom':
+                        camera.position.set(-d, 0, 0);
+                        camera.up.set(0, 0.866, -0.5);
+                        break;
+                }
             }
             controls.update();
             highlightButton(view);
