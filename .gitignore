@@ -1,0 +1,81 @@
+# DCM-CTViewer .gitignore
+
+# =============================================================================
+# Python
+# =============================================================================
+
+# Virtual environments (created by start.sh)
+venv/
+ctviewer_env/
+env/
+.venv/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# =============================================================================
+# Application Data
+# =============================================================================
+
+# Recent directories history (user-specific)
+recent_directories.json
+
+# =============================================================================
+# Operating System
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# =============================================================================
+# IDE / Editors
+# =============================================================================
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# =============================================================================
+# Medical Data (NEVER commit patient data)
+# =============================================================================
+
+# DICOM files
+*.dcm
+*.DCM
+
+# Common medical image exports
+# (uncomment if you want to exclude test images)
+# *.jpg
+# *.jpeg
+# *.png
+
+# Any data directories that might contain scans
+data/
+scans/
+patients/
+DICOM/

@@ -1,0 +1,81 @@
+==============================================================================
+                    CT VIEWER - QUICK START GUIDE
+==============================================================================
+
+FIRST: Double-click "START-HERE.html" for visual instructions with links!
+
+==============================================================================
+                         HOW IT WORKS
+==============================================================================
+
+  THE SOFTWARE (this folder)     YOUR SCAN IMAGES (anywhere else)
+  ---------------------------    --------------------------------
+  Put this CTViewer-Software     Your CT/MRI files (.dcm, .jpg,
+  folder anywhere you like.      .png) stay wherever they are.
+  It contains the viewer app.    The viewer doesn't move them.
+
+  WORKFLOW:  Launch Viewer  -->  Pick Scan Folder  -->  View in 3D
+             (from here)         (from anywhere)
+
+  The viewer remembers your recent folders for quick access!
+
+==============================================================================
+                         THE BASICS
+==============================================================================
+
+This software needs Python installed. If you don't have it:
+
+  Mac:     https://www.python.org/ftp/python/3.12.0/python-3.12.0-macos11.pkg
+  Windows: https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe
+
+  Windows users: CHECK "Add python.exe to PATH" during install!
+
+==============================================================================
+                     SETUP (after Python is installed)
+==============================================================================
+
+MAC:
+  Right-click start.sh → Open With → Terminal
+
+  The script will automatically:
+  - Create a virtual environment (first time only)
+  - Install all required packages
+  - Start the viewer and open your browser
+
+  Alternative (if Open With doesn't work):
+  1. Open Terminal (Cmd+Space, type Terminal)
+  2. Type: cd (with a space after it)
+  3. Drag this CTViewer folder from Finder into Terminal
+  4. Press Enter
+  5. Type: bash start.sh
+
+WINDOWS:
+  Double-click start.bat (it handles everything automatically)
+
+==============================================================================
+                         THEN WHAT?
+==============================================================================
+
+1. Browser opens to http://localhost:7002
+2. You'll see a FOLDER BROWSER screen
+3. Navigate to YOUR SCAN FOLDER by clicking through directories
+   - Folders with images are highlighted in GREEN
+   - The number of images is shown next to each folder
+4. Click "Open This Folder" when you find your scan
+5. Wait for the 3D model to build (a loading indicator shows progress)
+
+TIPS:
+  - Click ".." to go up to the parent folder
+  - Green highlighted folders contain DICOM/JPG/PNG image files
+  - Your recent folders are saved for quick access next time
+
+==============================================================================
+                      NEXT TIME (after first setup)
+==============================================================================
+
+MAC:     Right-click start.sh → Open With → Terminal
+WINDOWS: Double-click start.bat
+
+Your recent scan folders will be remembered!
+
+==============================================================================

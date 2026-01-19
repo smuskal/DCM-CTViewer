@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CT Viewer - Setup Instructions</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #2c5aa0;
+            border-bottom: 3px solid #2c5aa0;
+            padding-bottom: 10px;
+        }
+        h2 { color: #2c5aa0; margin-top: 30px; }
+        .overview-box {
+            background: linear-gradient(135deg, #e8f4fd 0%, #d4e8f7 100%);
+            border: 2px solid #2c5aa0;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 25px 0;
+        }
+        .overview-box h2 {
+            margin-top: 0;
+            color: #1a4a7a;
+        }
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 15px 0;
+        }
+        .column-box {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2c5aa0;
+        }
+        .column-box h4 {
+            margin: 0 0 10px 0;
+            color: #2c5aa0;
+        }
+        .column-box p { margin: 0; font-size: 14px; }
+        .workflow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .workflow-step {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .workflow-step .icon { font-size: 28px; }
+        .workflow-step .label { font-size: 13px; margin-top: 5px; }
+        .workflow-arrow { font-size: 24px; color: #2c5aa0; }
+        .os-tabs {
+            display: flex;
+            gap: 10px;
+            margin: 30px 0 20px 0;
+        }
+        .os-tab {
+            padding: 15px 30px;
+            background: #ddd;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .os-tab.active {
+            background: white;
+            color: #2c5aa0;
+        }
+        .os-content {
+            display: none;
+            background: white;
+            padding: 30px;
+            border-radius: 0 8px 8px 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .os-content.active { display: block; }
+        .step {
+            background: #f8f9fa;
+            border-left: 4px solid #2c5aa0;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .step-number {
+            display: inline-block;
+            background: #2c5aa0;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 32px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .step h3 {
+            display: inline;
+            color: #2c5aa0;
+        }
+        a.button {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        a.button:hover { background: #218838; }
+        code {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: "SF Mono", Monaco, "Courier New", monospace;
+        }
+        .command-box {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: "SF Mono", Monaco, "Courier New", monospace;
+            font-size: 14px;
+            margin: 15px 0;
+            position: relative;
+            overflow-x: auto;
+        }
+        .copy-btn {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            background: #4a4a4a;
+            color: white;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .copy-btn:hover { background: #5a5a5a; }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #28a745;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .info-box {
+            background: #e7f3ff;
+            border: 1px solid #b3d7ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        ul { padding-left: 20px; }
+        li { margin: 8px 0; }
+        @media (max-width: 600px) {
+            .two-column { grid-template-columns: 1fr; }
+            .workflow { flex-direction: column; }
+            .workflow-arrow { transform: rotate(90deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>CT Viewer - Setup Instructions</h1>
+
+    <!-- HOW IT WORKS SECTION -->
+    <div class="overview-box">
+        <h2>How It Works</h2>
+        <p>CT Viewer is a simple application that displays your medical scans in 3D. Here's the key concept:</p>
+
+        <div class="two-column">
+            <div class="column-box">
+                <h4>The Software (this folder)</h4>
+                <p>Put this <strong>CTViewer-Software</strong> folder anywhere on your computer. It contains the viewer application.</p>
+            </div>
+            <div class="column-box">
+                <h4>Your Scan Images (separate)</h4>
+                <p>Your CT/MRI scan files (.dcm, .jpg, .png) stay wherever they are. The viewer doesn't move or copy them.</p>
+            </div>
+        </div>
+
+        <p style="margin-top:20px;"><strong>The Workflow:</strong></p>
+        <div class="workflow">
+            <div class="workflow-step">
+                <div class="icon">&#9654;</div>
+                <div class="label">Launch<br>CT Viewer</div>
+            </div>
+            <div class="workflow-arrow">&#10140;</div>
+            <div class="workflow-step">
+                <div class="icon">&#128193;</div>
+                <div class="label">Select Your<br>Scan Folder</div>
+            </div>
+            <div class="workflow-arrow">&#10140;</div>
+            <div class="workflow-step">
+                <div class="icon">&#129728;</div>
+                <div class="label">View in 3D</div>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <strong>Recent Folders:</strong> The viewer remembers folders you've opened before, so you can quickly access your scans again without retyping the path.
+        </div>
+    </div>
+
+    <!-- OS SELECTION TABS -->
+    <div class="os-tabs">
+        <button class="os-tab active" onclick="showOS('mac')">Mac</button>
+        <button class="os-tab" onclick="showOS('windows')">Windows PC</button>
+    </div>
+
+    <!-- MAC INSTRUCTIONS -->
+    <div id="mac-content" class="os-content active">
+        <h2>Setup for Mac</h2>
+
+        <div class="step">
+            <span class="step-number">1</span>
+            <h3>Install Python (if not already installed)</h3>
+            <p>Check if Python is installed by opening Terminal and typing <code>python3 --version</code></p>
+            <p>If not installed, click below to download:</p>
+            <a href="https://www.python.org/ftp/python/3.12.0/python-3.12.0-macos11.pkg" class="button">Download Python for Mac</a>
+            <p style="margin-top:15px;">After downloading:</p>
+            <ul>
+                <li>Double-click the downloaded file (<code>python-3.12.0-macos11.pkg</code>)</li>
+                <li>Click <strong>Continue</strong> through the installer</li>
+                <li>Click <strong>Install</strong> and enter your password</li>
+                <li>Click <strong>Close</strong> when done</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">2</span>
+            <h3>Run the Start Script</h3>
+            <p>In this CTViewer folder, <strong>right-click</strong> the file <code>start.sh</code> and select:</p>
+            <p><strong>Open With → Terminal</strong></p>
+
+            <div class="info-box">
+                <strong>First time only:</strong> The script will automatically:
+                <ul style="margin-bottom:0;">
+                    <li>Create a virtual environment</li>
+                    <li>Install all required packages</li>
+                    <li>Start the viewer</li>
+                </ul>
+                This may take a few minutes.
+            </div>
+
+            <div class="warning" style="margin-top:15px;">
+                <strong>If "Open With → Terminal" doesn't appear:</strong>
+                <ol style="margin-bottom:0;">
+                    <li>Open Terminal (Command+Space, type Terminal)</li>
+                    <li>Type: <code>cd </code> (with a space)</li>
+                    <li>Drag this CTViewer folder into Terminal</li>
+                    <li>Press Enter</li>
+                    <li>Type: <code>bash start.sh</code> and press Enter</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">3</span>
+            <h3>Browse and Open Your Scan</h3>
+            <p>Your browser will open to the CT Viewer. You'll see a <strong>folder browser</strong>:</p>
+            <ul>
+                <li><strong>Recent Folders</strong> appear at the top - click <strong>Open</strong> to load directly</li>
+                <li>Or <strong>browse</strong> to navigate to your scan folder</li>
+                <li>Folders containing images are <strong>highlighted in green</strong></li>
+                <li>Click <strong>Open This Folder</strong> when you find your scan</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <strong>Next Time:</strong> Just right-click <code>start.sh</code> → Open With → Terminal<br>
+            <span style="font-size:13px;">The virtual environment is saved, so startup will be fast.</span>
+        </div>
+    </div>
+
+    <!-- WINDOWS INSTRUCTIONS -->
+    <div id="windows-content" class="os-content">
+        <h2>Setup for Windows PC</h2>
+
+        <div class="step">
+            <span class="step-number">1</span>
+            <h3>Download and Install Python</h3>
+            <a href="https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe" class="button">Download Python for Windows</a>
+            <p style="margin-top:15px;">After downloading:</p>
+            <ul>
+                <li>Double-click the downloaded file</li>
+                <li class="warning" style="list-style:none; margin-left:-20px;">
+                    <strong>IMPORTANT:</strong> Check the box that says <strong>"Add python.exe to PATH"</strong> at the bottom of the installer!
+                </li>
+                <li>Click <strong>Install Now</strong></li>
+                <li>Click <strong>Close</strong> when done</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">2</span>
+            <h3>Launch the Viewer</h3>
+            <p>In this CTViewer-Software folder, <strong>double-click</strong> the file:</p>
+            <div class="command-box">start.bat</div>
+            <p>This will:</p>
+            <ul>
+                <li>Install required components (first time only)</li>
+                <li>Start the CT Viewer</li>
+                <li>Open your web browser automatically</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <span class="step-number">3</span>
+            <h3>Browse and Open Your Scan</h3>
+            <p>Your browser will open to the CT Viewer. You'll see a <strong>folder browser</strong>:</p>
+            <ul>
+                <li><strong>Recent Folders</strong> appear at the top - click <strong>Open</strong> to load directly</li>
+                <li>Or <strong>browse</strong> through folders to find your scan</li>
+                <li>Folders containing images are <strong>highlighted in green</strong></li>
+                <li>Click <strong>Open This Folder</strong> when you find your scan</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <strong>Next Time:</strong> Just double-click <code>start.bat</code> to launch the viewer. Your recent folders will be remembered!
+        </div>
+    </div>
+
+    <hr style="margin: 40px 0;">
+
+    <h2>Using the CT Viewer</h2>
+
+    <div class="info-box">
+        <strong>Supported File Formats:</strong>
+        <ul style="margin-bottom:0;">
+            <li><strong>DICOM (.dcm)</strong> - Standard medical imaging format from CT/MRI scanners</li>
+            <li><strong>JPEG (.jpg)</strong> - Exported image sequences</li>
+            <li><strong>PNG (.png)</strong> - Exported image sequences</li>
+        </ul>
+    </div>
+
+    <h3>Viewing Controls</h3>
+    <ul>
+        <li><strong>3D View (left panel):</strong>
+            <ul>
+                <li>Click and drag to rotate</li>
+                <li>Scroll to zoom in/out</li>
+                <li>Right-click and drag to pan</li>
+            </ul>
+        </li>
+        <li><strong>Slice Views (right panel):</strong>
+            <ul>
+                <li>Use sliders to scroll through slices</li>
+                <li>Axial = top-to-bottom</li>
+                <li>Sagittal = left-to-right</li>
+                <li>Coronal = front-to-back</li>
+            </ul>
+        </li>
+        <li><strong>Presets:</strong> Use the dropdown to switch between Dental, Bone, Soft Tissue, or Lung views</li>
+    </ul>
+
+    <h2>Troubleshooting</h2>
+    <ul>
+        <li><strong>"python" not recognized:</strong> Restart your computer after installing Python</li>
+        <li><strong>Browser shows "can't connect":</strong> Make sure Terminal/Command Prompt is still open</li>
+        <li><strong>To stop the viewer:</strong> Close the Terminal/Command Prompt window, or press Ctrl+C</li>
+        <li><strong>Scan not loading:</strong> Make sure the folder contains .dcm, .jpg, or .png files (not subfolders)</li>
+    </ul>
+
+    <script>
+        function showOS(os) {
+            document.querySelectorAll('.os-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.os-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.os-tab[onclick="showOS('${os}')"]`).classList.add('active');
+            document.getElementById(os + '-content').classList.add('active');
+        }
+
+        function copyCommand(id) {
+            const text = document.getElementById(id).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.querySelector(`#${id}`).parentElement.querySelector('.copy-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            });
+        }
+
+        // Auto-detect OS
+        if (navigator.platform.indexOf('Win') > -1) {
+            showOS('windows');
+        }
+    </script>
+</body>
+</html>
