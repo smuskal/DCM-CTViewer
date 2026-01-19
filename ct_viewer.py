@@ -469,12 +469,21 @@ def create_mesh(volume, spacing, preset_name='auto'):
 
     print(f"Mesh created: {len(verts)} vertices, {len(faces)} faces")
 
-    # Center and scale
-    center = verts.mean(axis=0)
-    verts = verts - center
-    max_extent = np.abs(verts).max()
-    if max_extent > 0:
-        verts = verts / max_extent * 100
+    # Center based on VOLUME dimensions, not mesh vertex mean
+    # This ensures cross-section planes (positioned by volume indices) align with mesh
+    vol_extent = np.array([
+        volume.shape[0] * spacing[0],
+        volume.shape[1] * spacing[1],
+        volume.shape[2] * spacing[2]
+    ])
+    vol_center = vol_extent / 2
+    verts = verts - vol_center
+
+    # Scale uniformly based on largest volume dimension
+    # This ensures planes at volume edges reach mesh edges
+    max_vol_dim = vol_extent.max()
+    if max_vol_dim > 0:
+        verts = verts / max_vol_dim * 100
 
     return verts, faces, normals
 
@@ -1125,6 +1134,7 @@ VIEWER_HTML = '''
     <script>
         let scene, camera, renderer, controls, mesh;
         let volumeShape = {{ shape | tojson }};
+        let planeRanges = {{ plane_ranges | tojson }};  // Half-extent for each axis (axial, coronal, sagittal)
         let windowCenter = {{ window_center }};
         let windowWidth = {{ window_width }};
         let meshColor = {{ mesh_color }};
@@ -1252,12 +1262,17 @@ VIEWER_HTML = '''
                 const rotatedPoint = point.clone();
                 rotatedPoint.applyAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 6);
 
+                // Use axis-specific ranges for coordinate conversion
+                const axialRange = planeRanges[0] * 2;
+                const coronalRange = planeRanges[1] * 2;
+                const sagittalRange = planeRanges[2] * 2;
+
                 const axialIdx = Math.max(0, Math.min(volumeShape[0] - 1,
-                    Math.round((rotatedPoint.z / 100 + 0.5) * volumeShape[0])));
+                    Math.round((0.5 - rotatedPoint.z / axialRange) * (volumeShape[0] - 1))));
                 const coronalIdx = Math.max(0, Math.min(volumeShape[1] - 1,
-                    Math.round((rotatedPoint.y / 100 + 0.5) * volumeShape[1])));
+                    Math.round((0.5 - rotatedPoint.y / coronalRange) * (volumeShape[1] - 1))));
                 const sagittalIdx = Math.max(0, Math.min(volumeShape[2] - 1,
-                    Math.round((rotatedPoint.x / 100 + 0.5) * volumeShape[2])));
+                    Math.round((rotatedPoint.x / sagittalRange + 0.5) * (volumeShape[2] - 1))));
 
                 document.getElementById('axial-slider').value = axialIdx;
                 document.getElementById('coronal-slider').value = coronalIdx;
@@ -1275,27 +1290,42 @@ VIEWER_HTML = '''
             if (sagittalPlane) scene.remove(sagittalPlane);
             if (coronalPlane) scene.remove(coronalPlane);
 
-            const size = 120;
+            if (!volumeShape) return;
+            const size = 160;  // Larger planes for better visibility
+            // Use axis-specific ranges from server (matches mesh scaling)
+            const axialRange = planeRanges[0] * 2;    // Full range for z-axis
+            const coronalRange = planeRanges[1] * 2;  // Full range for y-axis
+            const sagittalRange = planeRanges[2] * 2; // Full range for x-axis
+            const tilt = Math.PI / 6;
 
-            const axialMat = new THREE.MeshBasicMaterial({color: 0x4fc3f7, transparent: true, opacity: 0.15, side: THREE.DoubleSide});
+            // Axial (blue) - horizontal slice through body
+            // After mesh flip (Math.PI - tilt), positions need to be inverted
+            const axialMat = new THREE.MeshBasicMaterial({color: 0x4fc3f7, transparent: true, opacity: 0.2, side: THREE.DoubleSide});
             axialPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), axialMat);
-            axialPlane.rotation.x = Math.PI / 2 - Math.PI / 6;
-            axialPlane.position.z = (axial / volumeShape[0] - 0.5) * 100 * Math.cos(Math.PI/6);
-            axialPlane.position.y = -(axial / volumeShape[0] - 0.5) * 100 * Math.sin(Math.PI/6);
+            axialPlane.rotation.x = Math.PI / 2 + tilt;
+            // Map slider 0..max to +half..-half (flipped for correct orientation)
+            const axialPos = (0.5 - axial / Math.max(volumeShape[0] - 1, 1)) * axialRange;
+            axialPlane.position.z = axialPos * Math.cos(tilt);
+            axialPlane.position.y = axialPos * Math.sin(tilt);
             scene.add(axialPlane);
 
-            const sagMat = new THREE.MeshBasicMaterial({color: 0xff6b6b, transparent: true, opacity: 0.15, side: THREE.DoubleSide});
+            // Sagittal (red) - side slice (left-right)
+            const sagMat = new THREE.MeshBasicMaterial({color: 0xff6b6b, transparent: true, opacity: 0.2, side: THREE.DoubleSide});
             sagittalPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), sagMat);
             sagittalPlane.rotation.y = Math.PI / 2;
-            sagittalPlane.rotation.x = -Math.PI / 6;
-            sagittalPlane.position.x = (sagittal / volumeShape[2] - 0.5) * 100;
+            sagittalPlane.rotation.x = tilt;
+            // Map slider 0..max to -half..+half
+            sagittalPlane.position.x = (sagittal / Math.max(volumeShape[2] - 1, 1) - 0.5) * sagittalRange;
             scene.add(sagittalPlane);
 
-            const corMat = new THREE.MeshBasicMaterial({color: 0x6bff6b, transparent: true, opacity: 0.15, side: THREE.DoubleSide});
+            // Coronal (green) - front/back slice
+            const corMat = new THREE.MeshBasicMaterial({color: 0x6bff6b, transparent: true, opacity: 0.2, side: THREE.DoubleSide});
             coronalPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), corMat);
-            coronalPlane.rotation.x = -Math.PI / 6;
-            coronalPlane.position.y = (coronal / volumeShape[1] - 0.5) * 100 * Math.cos(Math.PI/6);
-            coronalPlane.position.z = (coronal / volumeShape[1] - 0.5) * 100 * Math.sin(Math.PI/6);
+            coronalPlane.rotation.x = tilt;
+            // Map slider 0..max to +half..-half (flipped for correct orientation)
+            const coronalPos = (0.5 - coronal / Math.max(volumeShape[1] - 1, 1)) * coronalRange;
+            coronalPlane.position.y = coronalPos * Math.cos(tilt);
+            coronalPlane.position.z = -coronalPos * Math.sin(tilt);
             scene.add(coronalPlane);
         }
 
@@ -1529,11 +1559,28 @@ def viewer():
 
     mesh_color = preset['mesh_color']
 
+    # Calculate plane ranges for accurate cross-section positioning
+    # These match the scaling used in create_mesh()
+    spacing = current_spacing if current_spacing else (1, 1, 1)
+    vol_extent = [
+        current_shape[0] * spacing[0],
+        current_shape[1] * spacing[1],
+        current_shape[2] * spacing[2]
+    ]
+    max_vol_dim = max(vol_extent)
+    scale_factor = 100 / max_vol_dim if max_vol_dim > 0 else 1
+    plane_ranges = [
+        vol_extent[0] * scale_factor / 2,  # axial (z) half-range
+        vol_extent[1] * scale_factor / 2,  # coronal (y) half-range
+        vol_extent[2] * scale_factor / 2   # sagittal (x) half-range
+    ]
+
     return render_template_string(VIEWER_HTML,
                                   directory_name=dir_name,
                                   image_type=img_type,
                                   slice_count=count,
                                   shape=current_shape,
+                                  plane_ranges=plane_ranges,
                                   window_center=window_center,
                                   window_width=window_width,
                                   scan_type=current_scan_type,
