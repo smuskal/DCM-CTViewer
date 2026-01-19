@@ -1,22 +1,35 @@
-# DCM-CTViewer - Python Dependencies (Frozen)
-# Install with: pip install -r requirements.txt
+# DCM-CTViewer - Python Dependencies
 #
-# These versions are pinned for 100% reproducible installs.
+# INSTALLATION:
+#
+# For Apple Silicon Macs (M1/M2/M3/M4):
+#   arch -arm64 python3 -m venv venv
+#   arch -arm64 ./venv/bin/pip install --only-binary :all: -r requirements.txt
+#
+# For Intel Macs or Linux:
+#   python3 -m venv venv
+#   ./venv/bin/pip install --only-binary :all: -r requirements.txt
+#
+# For Windows:
+#   python -m venv venv
+#   venv\Scripts\pip install -r requirements.txt
+#
+# These versions are pinned for reproducible installs.
 # Last updated: January 2026
 
 # Web Framework
 flask==3.1.2
-werkzeug==3.1.3
+werkzeug==3.1.5
 
 # Image Processing
 pillow==12.1.0
 
-# Scientific Computing
+# Scientific Computing (use binary wheels to avoid compilation)
 numpy==2.4.1
-scipy==1.12.0
+scipy==1.17.0
 scikit-image==0.26.0
 
-# DICOM Support (optional - viewer works with JPG/PNG without this)
+# DICOM Support
 pydicom==3.0.1
 
 # JPEG compression support for DICOM files

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-CT Viewer - Universal CT/MRI Image Viewer
-Supports DICOM files and JPG image sequences
-Web-based 3D visualization with cross-sectional MPR views
-
+3D CT/MRI Viewer for Dental and Medical Scans
+Web-based viewer using Flask and Three.js
+Supports DICOM files and JPG/PNG image sequences
 Features:
 - Directory picker with recent history
-- Auto-detection of image format (DICOM or JPG)
 - 3D reconstruction with noise reduction
-- Interactive cross-sectional navigation
+- Cross-sectional MPR views with interactive plane selection
+Run this script and open http://localhost:7001 in your browser
 """
 
 import os
@@ -36,63 +35,13 @@ app = Flask(__name__)
 CONFIG_FILE = Path(__file__).parent / "recent_directories.json"
 PORT = 7002
 
-# Global state
-current_volume = None
-current_spacing = None
-current_shape = None
-current_mesh = None
+# Global variables
+mesh_data = None
+volume_data = None
+volume_spacing = None
+volume_shape = None
 current_directory = None
-current_scan_type = None  # 'dental', 'thorax', 'head', 'body', or 'unknown'
-current_dicom_metadata = {}
 
-# Scan type presets: (threshold, window_center, window_width, keep_n_largest, mesh_color)
-SCAN_PRESETS = {
-    'dental': {
-        'threshold': 600,
-        'window_center': 400,
-        'window_width': 2000,
-        'keep_n_largest': 3,
-        'mesh_color': 0xf5f5dc,  # Bone/beige
-        'downsample_threshold': 400**3,
-        'use_morphological_closing': True,
-    },
-    'bone': {
-        'threshold': 300,
-        'window_center': 400,
-        'window_width': 2000,
-        'keep_n_largest': 5,
-        'mesh_color': 0xf5f5dc,
-        'downsample_threshold': 300**3,
-        'use_morphological_closing': True,
-    },
-    'soft_tissue': {
-        'threshold': 50,
-        'window_center': 40,
-        'window_width': 400,
-        'keep_n_largest': 3,
-        'mesh_color': 0xffcccc,
-        'downsample_threshold': 300**3,
-        'use_morphological_closing': False,
-    },
-    'lung': {
-        'threshold': -400,
-        'window_center': -600,
-        'window_width': 1500,
-        'keep_n_largest': 3,
-        'mesh_color': 0xccccff,
-        'downsample_threshold': 300**3,
-        'use_morphological_closing': False,
-    },
-    'auto': {
-        'threshold': None,  # Will be auto-detected
-        'window_center': None,
-        'window_width': None,
-        'keep_n_largest': 3,
-        'mesh_color': 0xcccccc,
-        'downsample_threshold': 300**3,
-        'use_morphological_closing': False,
-    }
-}
 
 def load_recent_directories():
     """Load list of recently used directories, filtering out non-existent ones."""
@@ -110,12 +59,14 @@ def load_recent_directories():
             pass
     return []
 
+
 def save_recent_directories(directories):
     """Save list of recently used directories."""
     # Keep only the 20 most recent
     directories = directories[:20]
     with open(CONFIG_FILE, 'w') as f:
         json.dump(directories, f, indent=2)
+
 
 def add_recent_directory(path):
     """Add a directory to recent list."""
@@ -127,37 +78,13 @@ def add_recent_directory(path):
     directories.insert(0, path)
     save_recent_directories(directories)
 
-def get_folder_info(path):
-    """Get list of subfolders and count of DCM/image files in a directory."""
-    folders = []
-    dcm_count = 0
-    try:
-        for item in sorted(os.listdir(path)):
-            item_path = os.path.join(path, item)
-            if os.path.isdir(item_path) and not item.startswith('.'):
-                try:
-                    # Count DICOM and image files
-                    files = os.listdir(item_path)
-                    dcm_files = [f for f in files if f.lower().endswith('.dcm')]
-                    jpg_files = [f for f in files if f.lower().endswith(('.jpg', '.jpeg'))]
-                    png_files = [f for f in files if f.lower().endswith('.png')]
-                    total_images = len(dcm_files) + len(jpg_files) + len(png_files)
-                    folders.append({
-                        'name': item,
-                        'path': item_path,
-                        'has_dcm': total_images > 0,
-                        'dcm_count': total_images
-                    })
-                except PermissionError:
-                    folders.append({'name': item, 'path': item_path, 'has_dcm': False, 'dcm_count': 0})
-            elif item.lower().endswith(('.dcm', '.jpg', '.jpeg', '.png')):
-                dcm_count += 1
-    except PermissionError:
-        pass
-    return folders, dcm_count
+def natural_sort_key(s):
+    """Sort strings with numbers naturally (1, 2, 10 instead of 1, 10, 2)."""
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split(r'(\d+)', str(s))]
 
 def detect_image_type(directory):
-    """Detect whether directory contains DICOM or JPG files."""
+    """Detect whether directory contains DICOM, JPG, or PNG files."""
     files = os.listdir(directory)
 
     dcm_count = sum(1 for f in files if f.lower().endswith('.dcm'))
@@ -172,73 +99,6 @@ def detect_image_type(directory):
         return 'png', png_count
     else:
         return None, 0
-
-def detect_scan_type(directory, volume_shape, dicom_metadata=None):
-    """Auto-detect scan type based on metadata, path, and volume characteristics."""
-    scan_type = 'auto'
-    confidence = 0
-
-    path_lower = directory.lower()
-
-    # Check path for hints
-    if 'dental' in path_lower or 'cbct' in path_lower or 'tooth' in path_lower or 'jaw' in path_lower:
-        scan_type = 'dental'
-        confidence = 0.8
-    elif 'thorax' in path_lower or 'chest' in path_lower or 'lung' in path_lower:
-        scan_type = 'lung'
-        confidence = 0.7
-    elif 'head' in path_lower or 'brain' in path_lower or 'cranial' in path_lower:
-        scan_type = 'bone'
-        confidence = 0.6
-
-    # Check DICOM metadata if available
-    if dicom_metadata:
-        body_part = dicom_metadata.get('BodyPartExamined', '').lower()
-        study_desc = dicom_metadata.get('StudyDescription', '').lower()
-        series_desc = dicom_metadata.get('SeriesDescription', '').lower()
-        modality = dicom_metadata.get('Modality', '').upper()
-
-        all_desc = f"{body_part} {study_desc} {series_desc}"
-
-        if any(x in all_desc for x in ['dental', 'tooth', 'jaw', 'mandible', 'maxilla', 'cbct']):
-            scan_type = 'dental'
-            confidence = 0.95
-        elif any(x in all_desc for x in ['thorax', 'chest', 'lung', 'pulmonary']):
-            scan_type = 'lung'
-            confidence = 0.9
-        elif body_part in ['head', 'brain', 'skull']:
-            scan_type = 'bone'
-            confidence = 0.8
-
-        # CBCT modality often indicates dental
-        if modality == 'CT' and 'cbct' in all_desc:
-            scan_type = 'dental'
-            confidence = 0.95
-
-    # Check volume aspect ratio - dental CBCT tends to be more cubic
-    if volume_shape and confidence < 0.7:
-        z, y, x = volume_shape
-        aspect_ratio = z / max(x, y) if max(x, y) > 0 else 1
-
-        # Dental CBCT typically has aspect ratio close to 1 (cubic-ish)
-        # Body CT is typically elongated (many more slices than width)
-        if 0.5 < aspect_ratio < 1.5 and max(x, y) < 600:
-            # Could be dental - small cubic volume
-            if scan_type == 'auto':
-                scan_type = 'dental'
-                confidence = 0.5
-        elif aspect_ratio > 2:
-            # Elongated - likely full body or thorax
-            if scan_type == 'auto':
-                scan_type = 'auto'  # Keep as auto for body scans
-
-    print(f"Detected scan type: {scan_type} (confidence: {confidence:.0%})")
-    return scan_type
-
-def natural_sort_key(s):
-    """Sort strings with numbers naturally (1, 2, 10 instead of 1, 10, 2)."""
-    return [int(text) if text.isdigit() else text.lower()
-            for text in re.split(r'(\d+)', str(s))]
 
 def load_image_series(directory):
     """Load JPG or PNG image sequence as 3D volume."""
@@ -276,39 +136,87 @@ def load_image_series(directory):
         if (i + 1) % 50 == 0:
             print(f"Loaded {i + 1}/{num_slices} slices...")
 
-    # Assume isotropic spacing for JPG (can be adjusted)
+    # Assume isotropic spacing for JPG/PNG (can be adjusted)
     spacing = (1.0, 1.0, 1.0)
 
     print(f"Volume loaded. Shape: {volume.shape}, Range: [{volume.min()}, {volume.max()}]")
 
-    return volume, spacing
+    # No DICOM orientation for image series
+    return volume, spacing, None
+
+def extract_dicom_orientation(ds):
+    """
+    Extract orientation information from DICOM metadata.
+    Returns dict with orientation info or None if not available.
+
+    Key DICOM tags:
+    - ImageOrientationPatient (0020,0037): Direction cosines of first row and column
+    - PatientPosition (0018,5100): Patient position (HFS, HFP, FFS, FFP, etc.)
+    - BodyPartExamined (0018,0015): Body part (HEAD, CHEST, ABDOMEN, etc.)
+    """
+    orientation = {}
+
+    try:
+        # ImageOrientationPatient: [row_x, row_y, row_z, col_x, col_y, col_z]
+        if hasattr(ds, 'ImageOrientationPatient'):
+            iop = [float(x) for x in ds.ImageOrientationPatient]
+            orientation['imageOrientation'] = iop
+            # Row direction = [iop[0], iop[1], iop[2]]
+            # Column direction = [iop[3], iop[4], iop[5]]
+            # Slice direction = cross product
+            row_dir = np.array(iop[0:3])
+            col_dir = np.array(iop[3:6])
+            slice_dir = np.cross(row_dir, col_dir)
+            orientation['rowDirection'] = row_dir.tolist()
+            orientation['colDirection'] = col_dir.tolist()
+            orientation['sliceDirection'] = slice_dir.tolist()
+            print(f"  DICOM orientation - Row: {row_dir}, Col: {col_dir}, Slice: {slice_dir}")
+
+        # PatientPosition: HFS (Head First Supine), HFP (Head First Prone),
+        # FFS (Feet First Supine), FFP (Feet First Prone), etc.
+        if hasattr(ds, 'PatientPosition'):
+            orientation['patientPosition'] = str(ds.PatientPosition)
+            print(f"  Patient position: {orientation['patientPosition']}")
+
+        # BodyPartExamined
+        if hasattr(ds, 'BodyPartExamined'):
+            orientation['bodyPart'] = str(ds.BodyPartExamined)
+            print(f"  Body part: {orientation['bodyPart']}")
+
+        # Modality (CT, MR, etc.)
+        if hasattr(ds, 'Modality'):
+            orientation['modality'] = str(ds.Modality)
+
+    except Exception as e:
+        print(f"  Warning: Could not extract DICOM orientation: {e}")
+        return None
+
+    return orientation if orientation else None
+
 
 def load_dicom_series(directory):
-    """Load DICOM series as 3D volume. Returns (volume, spacing, metadata)."""
-    global current_dicom_metadata
-
+    """Load all DICOM files from a directory and return a 3D numpy array."""
     if not DICOM_AVAILABLE:
-        raise ImportError("pydicom not available")
+        raise ImportError("pydicom not available - install with: pip install pydicom")
 
-    print(f"Loading DICOM series from: {directory}")
+    print(f"Loading DICOM files from: {directory}")
 
     dicom_files = []
     for f in os.listdir(directory):
-        if f.lower().endswith('.dcm'):
+        if f.endswith('.dcm'):
             filepath = os.path.join(directory, f)
             try:
                 ds = pydicom.dcmread(filepath)
                 if hasattr(ds, 'pixel_array'):
                     dicom_files.append((filepath, ds))
-            except:
+            except Exception as e:
                 pass
 
     if not dicom_files:
         raise ValueError("No valid DICOM files found")
 
-    print(f"Found {len(dicom_files)} DICOM files")
+    print(f"Found {len(dicom_files)} DICOM files with pixel data")
 
-    # Sort by slice location or instance number
     def get_sort_key(item):
         ds = item[1]
         if hasattr(ds, 'SliceLocation'):
@@ -316,6 +224,7 @@ def load_dicom_series(directory):
         elif hasattr(ds, 'InstanceNumber'):
             return int(ds.InstanceNumber)
         else:
+            import re
             match = re.search(r'(\d+)', os.path.basename(item[0]))
             return int(match.group(1)) if match else 0
 
@@ -326,21 +235,8 @@ def load_dicom_series(directory):
     cols = first_ds.Columns
     num_slices = len(dicom_files)
 
-    # Extract metadata for scan type detection
-    metadata = {
-        'BodyPartExamined': getattr(first_ds, 'BodyPartExamined', ''),
-        'StudyDescription': getattr(first_ds, 'StudyDescription', ''),
-        'SeriesDescription': getattr(first_ds, 'SeriesDescription', ''),
-        'Modality': getattr(first_ds, 'Modality', ''),
-        'Manufacturer': getattr(first_ds, 'Manufacturer', ''),
-        'InstitutionName': getattr(first_ds, 'InstitutionName', ''),
-    }
-    current_dicom_metadata = metadata
-    print(f"DICOM Metadata: BodyPart={metadata['BodyPartExamined']}, Study={metadata['StudyDescription']}")
-
     print(f"Volume dimensions: {cols} x {rows} x {num_slices}")
 
-    # Get spacing
     pixel_spacing = [1.0, 1.0]
     if hasattr(first_ds, 'PixelSpacing'):
         pixel_spacing = [float(first_ds.PixelSpacing[0]), float(first_ds.PixelSpacing[1])]
@@ -356,6 +252,10 @@ def load_dicom_series(directory):
     spacing = (slice_thickness, pixel_spacing[0], pixel_spacing[1])
     print(f"Voxel spacing: {spacing}")
 
+    # Extract DICOM orientation metadata from first slice
+    print("  Checking DICOM orientation metadata...")
+    dicom_orientation = extract_dicom_orientation(first_ds)
+
     volume = np.zeros((num_slices, rows, cols), dtype=np.int16)
 
     for i, (filepath, ds) in enumerate(dicom_files):
@@ -370,7 +270,7 @@ def load_dicom_series(directory):
 
     print(f"Volume loaded. Shape: {volume.shape}, Range: [{volume.min()}, {volume.max()}]")
 
-    return volume, spacing
+    return volume, spacing, dicom_orientation
 
 def load_volume(directory):
     """Auto-detect format and load volume."""
@@ -383,21 +283,43 @@ def load_volume(directory):
     else:
         raise ValueError(f"No supported image files found in {directory}")
 
-def create_mesh(volume, spacing, preset_name='auto'):
-    """Create 3D mesh from volume using preset settings."""
+def clean_volume_aggressive(volume, threshold, keep_n_largest=3):
+    """Apply aggressive noise reduction - keep only largest connected components."""
+    print("Applying noise reduction...")
+
+    binary = volume > threshold
+
+    print("  Labeling connected components...")
+    labeled, num_features = ndimage.label(binary)
+    print(f"  Found {num_features} connected components")
+
+    if num_features == 0:
+        return binary
+
+    component_sizes = ndimage.sum(binary, labeled, range(1, num_features + 1))
+    sorted_indices = np.argsort(component_sizes)[::-1]
+    keep_labels = sorted_indices[:keep_n_largest] + 1
+
+    print(f"  Keeping {keep_n_largest} largest components")
+    clean_binary = np.isin(labeled, keep_labels)
+
+    print("  Filling holes...")
+    clean_binary = morphology.remove_small_holes(clean_binary, max_size=500)
+
+    print("  Smoothing...")
+    struct = morphology.ball(1)
+    clean_binary = ndimage.binary_closing(clean_binary, structure=struct, iterations=1)
+
+    return clean_binary
+
+def create_mesh(volume, spacing, threshold=None, keep_n_largest=3):
+    """Create a 3D mesh from the volume using marching cubes."""
     print("Creating 3D mesh...")
 
-    preset = SCAN_PRESETS.get(preset_name, SCAN_PRESETS['auto'])
-    threshold = preset['threshold']
-    keep_n_largest = preset['keep_n_largest']
-    downsample_threshold = preset['downsample_threshold']
-    use_morphological_closing = preset['use_morphological_closing']
-
-    # Get data range
+    # Auto-detect threshold if not provided or if it's outside the data range
     vol_min, vol_max = volume.min(), volume.max()
-
-    # Auto-detect threshold if not set or outside data range
     if threshold is None or threshold >= vol_max or threshold <= vol_min:
+        # Use percentile-based threshold for auto-detection
         positive_vals = volume[volume > 0]
         if len(positive_vals) > 0:
             threshold = np.percentile(positive_vals, 70)
@@ -405,67 +327,40 @@ def create_mesh(volume, spacing, preset_name='auto'):
             threshold = np.percentile(volume, 80)
         print(f"Auto-detected threshold: {threshold:.1f} (data range: [{vol_min}, {vol_max}])")
     else:
-        print(f"Using threshold: {threshold} (preset: {preset_name}, data range: [{vol_min}, {vol_max}])")
+        print(f"Using threshold: {threshold} HU (data range: [{vol_min}, {vol_max}])")
 
-    # Downsample if needed
     step = 1
     vol_size = volume.shape[0] * volume.shape[1] * volume.shape[2]
-    if vol_size > downsample_threshold:
+    if vol_size > 400 * 400 * 400:
         step = 2
         volume = volume[::step, ::step, ::step]
         spacing = tuple(s * step for s in spacing)
         print(f"Downsampled to: {volume.shape}")
 
-    # Create binary mask
-    binary = volume > threshold
-
-    # Connected component analysis
-    print("  Finding connected components...")
-    labeled, num_features = ndimage.label(binary)
-
-    if num_features > 0:
-        component_sizes = ndimage.sum(binary, labeled, range(1, num_features + 1))
-        sorted_indices = np.argsort(component_sizes)[::-1]
-        keep_labels = sorted_indices[:keep_n_largest] + 1
-        binary = np.isin(labeled, keep_labels)
-    else:
-        # No components found - try a lower threshold
-        print("  Warning: No voxels above threshold, trying lower threshold...")
-        threshold = np.percentile(volume, 60)
-        print(f"  Retrying with threshold: {threshold:.1f}")
-        binary = volume > threshold
-        labeled, num_features = ndimage.label(binary)
-        if num_features > 0:
-            component_sizes = ndimage.sum(binary, labeled, range(1, num_features + 1))
-            sorted_indices = np.argsort(component_sizes)[::-1]
-            keep_labels = sorted_indices[:keep_n_largest] + 1
-            binary = np.isin(labeled, keep_labels)
+    binary = clean_volume_aggressive(volume, threshold, keep_n_largest)
 
     # Check if we have any voxels to mesh
     if not binary.any():
-        print("  Error: No voxels found for mesh generation")
-        return None, None, None
+        print("  Warning: No voxels above threshold, trying lower threshold...")
+        # Try a lower percentile
+        threshold = np.percentile(volume, 60)
+        print(f"  Retrying with threshold: {threshold:.1f}")
+        binary = clean_volume_aggressive(volume, threshold, keep_n_largest)
+        if not binary.any():
+            raise ValueError("Could not find suitable threshold for mesh generation")
 
-    # Smooth and clean
-    print("  Smoothing...")
-    binary = morphology.remove_small_holes(binary, area_threshold=500)
-
-    # Apply morphological closing for dental/bone scans (cleaner surface)
-    if use_morphological_closing:
-        print("  Applying morphological closing...")
-        struct = morphology.ball(1)
-        binary = ndimage.binary_closing(binary, structure=struct, iterations=1)
-
+    print("  Gaussian smoothing...")
     smoothed = ndimage.gaussian_filter(binary.astype(np.float32), sigma=1.0)
 
-    # Marching cubes
     try:
         verts, faces, normals, values = measure.marching_cubes(
-            smoothed, level=0.5, spacing=spacing, step_size=1
+            smoothed,
+            level=0.5,
+            spacing=spacing,
+            step_size=1
         )
-    except Exception as e:
-        print(f"  Mesh generation failed: {e}")
-        return None, None, None
+    except ValueError as e:
+        raise ValueError(f"Mesh generation failed: {e}. Try adjusting the threshold.")
 
     print(f"Mesh created: {len(verts)} vertices, {len(faces)} faces")
 
@@ -477,90 +372,221 @@ def create_mesh(volume, spacing, preset_name='auto'):
         volume.shape[2] * spacing[2]
     ])
     vol_center = vol_extent / 2
-    verts = verts - vol_center
+    verts_centered = verts - vol_center
 
     # Scale uniformly based on largest volume dimension
     # This ensures planes at volume edges reach mesh edges
     max_vol_dim = vol_extent.max()
-    if max_vol_dim > 0:
-        verts = verts / max_vol_dim * 100
+    scale_factor = 100 / max_vol_dim if max_vol_dim > 0 else 1
+    verts_scaled = verts_centered * scale_factor
 
-    return verts, faces, normals
+    return verts_scaled, faces, normals
 
 
-def analyze_mesh_orientation(vertices):
+def analyze_mesh_orientation(vertices, dicom_orientation=None):
     """
     Analyze mesh geometry to determine optimal viewing orientation.
-    Returns rotation angles (in radians) to orient the model with:
-    - Head/top at top of view
-    - Front facing the camera
+    Returns principal axes and camera view positions for anatomical views.
 
-    Uses bounding box analysis and center-of-mass distribution.
+    Standard DICOM/medical imaging convention (used regardless of bounding box):
+    - Volume axis 0 (mesh X) = axial/superior-inferior = head-to-toe
+    - Volume axis 1 (mesh Y) = coronal/anterior-posterior = front-to-back
+    - Volume axis 2 (mesh Z) = sagittal/left-right = left-to-right
+
+    This function determines front/back facing using DICOM metadata or asymmetry.
     """
     if len(vertices) == 0:
-        return {'rotateX': 0, 'rotateY': 0, 'rotateZ': 0}
+        return get_default_orientation()
 
     # Reshape vertices if flattened
     if vertices.ndim == 1:
         vertices = vertices.reshape(-1, 3)
 
-    # Calculate bounding box
+    print("  Analyzing mesh orientation...")
+
+    # Calculate bounding box for diagnostics
     min_coords = vertices.min(axis=0)
     max_coords = vertices.max(axis=0)
     extents = max_coords - min_coords
+    center = (min_coords + max_coords) / 2
 
-    print(f"  Mesh extents: X={extents[0]:.1f}, Y={extents[1]:.1f}, Z={extents[2]:.1f}")
+    print(f"  Bounding box extents: X={extents[0]:.1f}, Y={extents[1]:.1f}, Z={extents[2]:.1f}")
 
-    # In our coordinate system after centering:
-    # - vertices[:,0] = X (axial, head-to-toe)
-    # - vertices[:,1] = Y (coronal, front-to-back)
-    # - vertices[:,2] = Z (sagittal, left-to-right)
+    # Report aspect ratios for debugging
+    aspect_xy = extents[0] / max(extents[1], 0.001)
+    aspect_xz = extents[0] / max(extents[2], 0.001)
+    print(f"  Aspect ratios: X/Y={aspect_xy:.2f}, X/Z={aspect_xz:.2f}")
 
-    # Calculate center of mass for different portions to detect asymmetry
-    # For a human body/head, the face (nose, chin) creates frontal asymmetry
+    # Use DICOM orientation if available
+    dicom_guided = False
+    patient_facing = 'front'  # default: supine (face up)
+    head_first = True  # default: head first
 
-    # Split mesh into front/back halves based on Y
-    y_mid = (min_coords[1] + max_coords[1]) / 2
-    front_half = vertices[vertices[:, 1] < y_mid]
-    back_half = vertices[vertices[:, 1] >= y_mid]
+    if dicom_orientation:
+        print("  Using DICOM orientation metadata...")
+        dicom_guided = True
 
-    # Calculate "density" or vertex count in each half
+        # Check patient position
+        if 'patientPosition' in dicom_orientation:
+            pos = dicom_orientation['patientPosition'].upper()
+            # HFS = Head First Supine, HFP = Head First Prone
+            # FFS = Feet First Supine, FFP = Feet First Prone
+            if pos.startswith('HF'):
+                head_first = True
+                print(f"    Patient position: Head First ({pos})")
+            elif pos.startswith('FF'):
+                head_first = False
+                print(f"    Patient position: Feet First ({pos})")
+
+            if 'P' in pos:
+                patient_facing = 'back'
+                print("    Patient is prone (face down)")
+            elif 'S' in pos:
+                patient_facing = 'front'
+                print("    Patient is supine (face up)")
+
+    # Detect front/back using asymmetry along Y axis (axis 1 = front-to-back)
+    # The front of a body (face, chest) typically has more complex geometry
+    axis_mid_y = center[1]
+    front_half = vertices[vertices[:, 1] < axis_mid_y]
+    back_half = vertices[vertices[:, 1] >= axis_mid_y]
+
     front_count = len(front_half)
     back_count = len(back_half)
-
-    # For a face/head scan, the front (face) typically has more detail/vertices
     front_bias = front_count / max(front_count + back_count, 1)
 
-    print(f"  Front/back vertex distribution: {front_bias:.2%} front")
+    print(f"  Front/back distribution: {front_bias:.2%} on -Y side (axis 1)")
 
-    # Determine if we need to flip Y (rotate 180 around Z)
-    rotate_y = 0
-    if front_bias < 0.45:  # Back-heavy, might need to flip
-        rotate_y = np.pi
-        print("  Model appears back-facing, will rotate 180°")
+    # Determine if we need to flip the front direction
+    # Use DICOM metadata if available, otherwise use geometric heuristic
+    if dicom_guided:
+        facing_away = (patient_facing == 'back')
+        if facing_away:
+            print("  DICOM indicates prone position (facing away)")
+    else:
+        # Geometric heuristic: if more vertices on +Y side, front is toward -Y
+        # This is a weak heuristic and may not always be correct
+        facing_away = front_bias < 0.45
+        if facing_away:
+            print("  Model may be facing away (geometric heuristic)")
 
-    # Check vertical orientation
-    x_mid = (min_coords[0] + max_coords[0]) / 2
-    top_half = vertices[vertices[:, 0] > x_mid]
-    bottom_half = vertices[vertices[:, 0] <= x_mid]
+    # Calculate the mesh rotation that was applied (Math.PI - Math.PI/6)
+    # This rotation is around the X axis (head-to-toe axis)
+    mesh_rotation_x = np.pi - np.pi / 6
+    cos_r = np.cos(mesh_rotation_x)
+    sin_r = np.sin(mesh_rotation_x)
 
-    top_count = len(top_half)
-    bottom_count = len(bottom_half)
-    bottom_bias = bottom_count / max(top_count + bottom_count, 1)
+    # Build rotation matrix for mesh rotation around X
+    rot_matrix = np.array([
+        [1, 0, 0],
+        [0, cos_r, -sin_r],
+        [0, sin_r, cos_r]
+    ])
 
-    print(f"  Top/bottom vertex distribution: {bottom_bias:.2%} bottom")
+    # Define anatomical directions in mesh LOCAL coordinates
+    # These produce the correct camera positions when transformed through rot_matrix:
+    # - Front camera at (0, 173, -100)
+    # - Back camera at (0, -173, 100)
+    # - Left camera at (0, 100, 173)
+    # - Right camera at (0, -100, -173)
+    # - Top camera at (200, 0, 0)
+    head_dir_local = np.array([1.0, 0.0, 0.0])   # +X = toward head
+    front_dir_local = np.array([0.0, 1.0, 0.0])  # +Y = toward front (face)
+    right_dir_local = np.array([0.0, 0.0, -1.0]) # -Z = toward right (DICOM convention: +Z is patient left)
+
+    # Flip head direction if feet first
+    if not head_first:
+        head_dir_local = -head_dir_local
+        print("  Flipped head direction for feet-first scan")
+
+    # Apply mesh rotation to get WORLD coordinates
+    head_dir_world = rot_matrix @ head_dir_local
+    front_dir_world = rot_matrix @ front_dir_local
+    right_dir_world = rot_matrix @ right_dir_local
+
+    # If facing away (prone), flip the front direction
+    if facing_away:
+        front_dir_world = -front_dir_world
+        print("  Flipped front direction for prone/facing-away")
+
+    # Normalize directions
+    head_dir_world = head_dir_world / np.linalg.norm(head_dir_world)
+    front_dir_world = front_dir_world / np.linalg.norm(front_dir_world)
+    right_dir_world = right_dir_world / np.linalg.norm(right_dir_world)
+
+    print(f"  Head direction (world): [{head_dir_world[0]:.3f}, {head_dir_world[1]:.3f}, {head_dir_world[2]:.3f}]")
+    print(f"  Front direction (world): [{front_dir_world[0]:.3f}, {front_dir_world[1]:.3f}, {front_dir_world[2]:.3f}]")
+    print(f"  Right direction (world): [{right_dir_world[0]:.3f}, {right_dir_world[1]:.3f}, {right_dir_world[2]:.3f}]")
+
+    # Calculate camera positions for each view (opposite to viewing direction)
+    d = 200  # Camera distance
+
+    # For each view, camera is positioned opposite to the direction we want to see
+    view_positions = {
+        'front': (-front_dir_world * d).tolist(),
+        'back': (front_dir_world * d).tolist(),
+        'left': (right_dir_world * d).tolist(),  # Left side seen from +right direction
+        'right': (-right_dir_world * d).tolist(),
+        'top': (head_dir_world * d).tolist(),
+        'bottom': (-head_dir_world * d).tolist()
+    }
+
+    # Camera up vector should be the head direction for most views
+    # For top/bottom, use front direction as the "up" in the camera view
+    view_ups = {
+        'front': head_dir_world.tolist(),
+        'back': head_dir_world.tolist(),
+        'left': head_dir_world.tolist(),
+        'right': head_dir_world.tolist(),
+        'top': front_dir_world.tolist(),     # Looking down at top of head, face direction is "up"
+        'bottom': (-front_dir_world).tolist()
+    }
 
     return {
-        'rotateX': 0.0,
-        'rotateY': float(rotate_y),
-        'rotateZ': 0.0,
+        'primaryAxis': 0,  # Always axis 0 (head-to-toe) per DICOM convention
+        'extents': extents.tolist(),
+        'headDirection': head_dir_world.tolist(),
+        'frontDirection': front_dir_world.tolist(),
+        'rightDirection': right_dir_world.tolist(),
+        'facingAway': facing_away,
         'frontBias': float(front_bias),
-        'bottomBias': float(bottom_bias)
+        'viewPositions': view_positions,
+        'viewUps': view_ups
     }
 
 
-def get_slice_image(volume, axis, index, window_center=0, window_width=1000):
-    """Extract 2D slice as base64 PNG."""
+def get_default_orientation():
+    """Return default orientation when analysis fails - matches original hardcoded values."""
+    d = 200
+    return {
+        'primaryAxis': 0,
+        'extents': [100, 100, 100],
+        'headDirection': [1, 0, 0],
+        'frontDirection': [0, -0.866, 0.5],
+        'rightDirection': [0, 0.5, 0.866],  # Fixed: matches rot_matrix @ [0,0,-1]
+        'facingAway': False,
+        'frontBias': 0.5,
+        'viewPositions': {
+            'front': [0, 173, -100],
+            'back': [0, -173, 100],
+            'left': [0, 100, 173],
+            'right': [0, -100, -173],
+            'top': [200, 0, 0],
+            'bottom': [-200, 0, 0]
+        },
+        'viewUps': {
+            'front': [1, 0, 0],
+            'back': [1, 0, 0],
+            'left': [1, 0, 0],
+            'right': [1, 0, 0],
+            'top': [0, -0.866, 0.5],   # Fixed: front_dir_world
+            'bottom': [0, 0.866, -0.5]  # Fixed: -front_dir_world
+        }
+    }
+
+
+def get_slice_image(volume, axis, index, window_center=400, window_width=2000):
+    """Extract a 2D slice and return as base64 PNG."""
     if axis == 'axial':
         index = max(0, min(index, volume.shape[0] - 1))
         slice_data = volume[index, :, :]
@@ -579,6 +605,7 @@ def get_slice_image(volume, axis, index, window_center=0, window_width=1000):
     slice_data = ((slice_data - min_val) / (max_val - min_val) * 255).astype(np.uint8)
 
     img = Image.fromarray(slice_data)
+
     max_dim = 400
     ratio = max_dim / max(img.size)
     new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
@@ -588,43 +615,29 @@ def get_slice_image(volume, axis, index, window_center=0, window_width=1000):
     img.save(buffer, format='PNG')
     return base64.b64encode(buffer.getvalue()).decode()
 
-# ============== HTML Templates ==============
-
 DIRECTORY_PICKER_HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CT Viewer - Select Directory</title>
+    <title>3D Dental CT Viewer</title>
     <style>
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            padding: 40px;
+            padding: 20px;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             font-family: Arial, sans-serif;
             color: white;
             min-height: 100vh;
         }
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-        }
-        h1 {
-            color: #4fc3f7;
-            margin-bottom: 30px;
-        }
-        .section {
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #4fc3f7; margin-bottom: 5px; font-size: 24px; }
+        .subtitle { color: rgba(255,255,255,0.5); margin-bottom: 20px; font-size: 14px; }
+        .browser-section {
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
-            padding: 25px;
-            margin-bottom: 25px;
-        }
-        .section h2 {
-            color: #4fc3f7;
-            margin-top: 0;
-            font-size: 18px;
-            border-bottom: 1px solid rgba(79,195,247,0.3);
-            padding-bottom: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
         }
         .current-path {
             background: rgba(0,0,0,0.3);
@@ -634,92 +647,76 @@ DIRECTORY_PICKER_HTML = '''
             font-size: 13px;
             margin-bottom: 15px;
             word-break: break-all;
+            border: 1px solid rgba(79,195,247,0.2);
         }
         .folder-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
             max-height: 400px;
             overflow-y: auto;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            margin-bottom: 15px;
         }
-        .folder-list li {
-            padding: 10px 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 6px;
-            margin-bottom: 6px;
+        .folder-item {
+            padding: 12px 15px;
             cursor: pointer;
-            transition: background 0.2s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .folder-list li:hover { background: rgba(79,195,247,0.2); }
-        .folder-list li.has-images {
-            background: rgba(76, 175, 80, 0.2);
-            border-left: 3px solid #4caf50;
-        }
-        .folder-list li.has-images:hover { background: rgba(76, 175, 80, 0.35); }
-        .folder-list li.parent-dir {
-            background: rgba(255,193,7,0.15);
-            font-weight: bold;
-        }
-        .folder-list li.parent-dir:hover { background: rgba(255,193,7,0.3); }
-        .folder-name {
+            border-bottom: 1px solid rgba(255,255,255,0.05);
             display: flex;
             align-items: center;
             gap: 10px;
+            transition: background 0.15s;
         }
+        .folder-item:hover { background: rgba(79,195,247,0.15); }
+        .folder-item:last-child { border-bottom: none; }
+        .folder-item.parent { color: #4fc3f7; }
+        .folder-item.has-dcm { color: #6bff6b; }
         .folder-icon { font-size: 18px; }
-        .image-count {
-            background: #4caf50;
-            color: white;
+        .folder-name { flex: 1; font-size: 14px; }
+        .dcm-badge {
+            background: rgba(107,255,107,0.2);
+            color: #6bff6b;
             padding: 2px 8px;
-            border-radius: 10px;
+            border-radius: 4px;
             font-size: 11px;
-            font-weight: bold;
         }
-        button {
-            padding: 12px 25px;
+        .btn-row { display: flex; gap: 10px; }
+        .open-btn {
+            flex: 1;
+            padding: 15px;
             background: #4fc3f7;
             color: #1a1a2e;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             font-weight: bold;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button:hover { background: #81d4fa; }
-        button:disabled {
-            background: #555;
-            color: #888;
-            cursor: not-allowed;
-        }
-        .open-btn {
-            width: 100%;
-            padding: 15px;
             font-size: 16px;
-            margin-top: 15px;
+            cursor: pointer;
         }
-        .open-btn.ready {
-            background: #4caf50;
+        .open-btn:hover { background: #81d4fa; }
+        .open-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+        .error {
+            color: #ff6b6b;
+            background: rgba(255,107,107,0.1);
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
         }
-        .open-btn.ready:hover { background: #66bb6a; }
-        .recent-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
+        .recent-section {
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            padding: 20px;
         }
+        .recent-section h2 { color: #4fc3f7; margin: 0 0 15px 0; font-size: 16px; }
+        .recent-list { list-style: none; padding: 0; margin: 0; }
         .recent-list li {
             padding: 10px 12px;
-            background: rgba(255,255,255,0.05);
+            background: rgba(0,0,0,0.2);
             border-radius: 6px;
             margin-bottom: 6px;
             display: flex;
             align-items: center;
             gap: 10px;
-            transition: background 0.2s;
+            transition: background 0.15s;
         }
-        .recent-list li:hover { background: rgba(79,195,247,0.2); }
+        .recent-list li:hover { background: rgba(79,195,247,0.15); }
         .recent-path {
             flex: 1;
             cursor: pointer;
@@ -739,26 +736,7 @@ DIRECTORY_PICKER_HTML = '''
             white-space: nowrap;
         }
         .open-recent-btn:hover { background: #66bb6a; }
-        .empty-message {
-            color: rgba(255,255,255,0.5);
-            font-style: italic;
-        }
-        .info-box {
-            background: rgba(79,195,247,0.1);
-            border-left: 3px solid #4fc3f7;
-            padding: 15px;
-            border-radius: 0 6px 6px 0;
-            font-size: 13px;
-            line-height: 1.6;
-            margin-top: 15px;
-        }
-        .error { color: #ff6b6b; margin-top: 10px; }
-        .status-text {
-            text-align: center;
-            padding: 10px;
-            color: #aaa;
-            font-size: 13px;
-        }
+        .loading { text-align: center; padding: 40px; color: rgba(255,255,255,0.5); }
         /* Loading Modal */
         .loading-modal {
             display: none;
@@ -806,19 +784,20 @@ DIRECTORY_PICKER_HTML = '''
 </head>
 <body>
     <div class="container">
-        <h1>CT Viewer</h1>
+        <h1>3D Dental CT Viewer</h1>
+        <p class="subtitle">Select a folder containing CT images (DICOM, JPG, or PNG)</p>
 
         {% if error %}
         <p class="error">{{ error }}</p>
         {% endif %}
 
         {% if recent %}
-        <div class="section">
+        <div class="recent-section" style="margin-bottom: 20px;">
             <h2>Recent Folders</h2>
             <ul class="recent-list">
                 {% for path in recent %}
                 <li>
-                    <span class="recent-path" onclick="navigateTo('{{ path }}')">{{ path }}</span>
+                    <span class="recent-path" onclick="window.location='/browse?path={{ path | urlencode }}'">{{ path }}</span>
                     <button class="open-recent-btn" onclick="openRecent('{{ path }}')">Open</button>
                 </li>
                 {% endfor %}
@@ -826,52 +805,41 @@ DIRECTORY_PICKER_HTML = '''
         </div>
         {% endif %}
 
-        <div class="section">
-            <h2>Browse Folders</h2>
+        <div class="browser-section">
+            <h2 style="color: #4fc3f7; margin: 0 0 15px 0; font-size: 16px;">Browse Folders</h2>
             <div class="current-path">{{ current_path }}</div>
-
-            <ul class="folder-list">
+            <div class="folder-list">
                 {% if parent_path %}
-                <li class="parent-dir" onclick="navigateTo('{{ parent_path }}')">
-                    <span class="folder-name"><span class="folder-icon">⬆</span> ..</span>
-                </li>
+                <div class="folder-item parent" onclick="window.location='/browse?path={{ parent_path | urlencode }}'">
+                    <span class="folder-icon">&#8592;</span>
+                    <span class="folder-name">..</span>
+                </div>
                 {% endif %}
                 {% for folder in folders %}
-                <li class="{{ 'has-images' if folder.has_dcm else '' }}" onclick="navigateTo('{{ folder.path }}')">
-                    <span class="folder-name">
-                        <span class="folder-icon">📁</span>
-                        {{ folder.name }}
-                    </span>
-                    {% if folder.dcm_count > 0 %}
-                    <span class="image-count">{{ folder.dcm_count }} images</span>
+                <div class="folder-item {% if folder.has_dcm %}has-dcm{% endif %}"
+                     onclick="window.location='/browse?path={{ folder.path | urlencode }}'">
+                    <span class="folder-icon">&#128193;</span>
+                    <span class="folder-name">{{ folder.name }}</span>
+                    {% if folder.has_dcm %}
+                    <span class="dcm-badge">{{ folder.dcm_count }} images</span>
                     {% endif %}
-                </li>
+                </div>
                 {% endfor %}
-            </ul>
-
-            {% if dcm_count > 0 %}
-            <p class="status-text">This folder contains {{ dcm_count }} image files</p>
-            {% endif %}
-
-            <form id="load-form" action="/load" method="post">
-                <input type="hidden" name="path" id="load-path" value="{{ current_path }}">
-                <button type="submit" class="open-btn {{ 'ready' if dcm_count > 0 else '' }}"
-                        {{ '' if dcm_count > 0 else 'disabled' }}
-                        onclick="showLoading(event)">
-                    {% if dcm_count > 0 %}
-                    Open This Folder ({{ dcm_count }} images)
-                    {% else %}
-                    Select a folder containing images
-                    {% endif %}
-                </button>
-            </form>
-
-            <div class="info-box">
-                <b>Supported formats:</b><br>
-                • DICOM files (.dcm) - Medical CT/MRI scans<br>
-                • JPG sequences (.jpg, .jpeg) - Exported CT slices<br>
-                • PNG sequences (.png) - Exported CT slices<br><br>
-                <b>Tip:</b> Folders with images are highlighted in green.
+                {% if not folders and not parent_path %}
+                <div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.4);">No subfolders</div>
+                {% endif %}
+            </div>
+            <div class="btn-row">
+                <form id="load-form" action="/load" method="post" style="flex:1; display:flex;">
+                    <input type="hidden" name="path" id="load-path" value="{{ current_path }}">
+                    <button type="submit" class="open-btn" {% if dcm_count == 0 %}disabled{% endif %}>
+                        {% if dcm_count > 0 %}
+                        Open This Folder ({{ dcm_count }} images)
+                        {% else %}
+                        No image files in this folder
+                        {% endif %}
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -880,29 +848,31 @@ DIRECTORY_PICKER_HTML = '''
     <div id="loading-modal" class="loading-modal">
         <div class="loading-content">
             <div class="spinner"></div>
-            <div class="loading-text">Loading CT Images...</div>
+            <div class="loading-text">Loading DICOM Images...</div>
             <div class="loading-subtext">Building 3D model, please wait</div>
         </div>
     </div>
 
     <script>
-        function navigateTo(path) {
-            window.location.href = '/browse?path=' + encodeURIComponent(path);
-        }
-
+        // Open a recent folder directly
         function openRecent(path) {
-            showLoadingModal();
+            document.getElementById('loading-modal').classList.add('show');
             document.getElementById('load-path').value = path;
             document.getElementById('load-form').submit();
         }
 
-        function showLoading(event) {
-            showLoadingModal();
-        }
-
-        function showLoadingModal() {
-            document.getElementById('loading-modal').classList.add('show');
-        }
+        // Add loading modal to form submission
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('load-form');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    const btn = form.querySelector('button[type="submit"]');
+                    if (!btn.disabled) {
+                        document.getElementById('loading-modal').classList.add('show');
+                    }
+                });
+            }
+        });
     </script>
 
     <!-- Medical Disclaimer -->
@@ -921,11 +891,11 @@ DIRECTORY_PICKER_HTML = '''
 </html>
 '''
 
-VIEWER_HTML = '''
+HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CT Viewer - {{ directory_name }}</title>
+    <title>3D Dental CT Viewer</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -955,14 +925,6 @@ VIEWER_HTML = '''
             max-width: 300px;
         }
         #info h2 { margin-top: 0; color: #4fc3f7; font-size: 16px; }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 24px;
-            z-index: 200;
-        }
         .back-btn {
             position: absolute;
             top: 10px;
@@ -978,6 +940,37 @@ VIEWER_HTML = '''
             font-size: 13px;
         }
         .back-btn:hover { background: rgba(79,195,247,0.4); }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            z-index: 200;
+        }
+        .help-box {
+            background: #0f3460;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 3px solid #4fc3f7;
+        }
+        .help-box h3 {
+            margin: 0 0 8px 0;
+            color: #4fc3f7;
+            font-size: 14px;
+        }
+        .help-box p {
+            margin: 5px 0;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .help-box ul {
+            margin: 5px 0;
+            padding-left: 20px;
+            font-size: 12px;
+        }
+        .help-box li { margin: 4px 0; }
         .slice-panel {
             margin-bottom: 15px;
             background: #0f3460;
@@ -995,6 +988,7 @@ VIEWER_HTML = '''
             width: 12px;
             height: 12px;
             border-radius: 2px;
+            display: inline-block;
         }
         .slice-panel img {
             width: 100%;
@@ -1008,6 +1002,7 @@ VIEWER_HTML = '''
             justify-content: space-between;
             font-size: 11px;
             color: #aaa;
+            margin-top: 3px;
         }
         h2.sidebar-title {
             color: #4fc3f7;
@@ -1043,24 +1038,6 @@ VIEWER_HTML = '''
             font-weight: bold;
             font-size: 12px;
         }
-        .dir-info {
-            font-size: 11px;
-            color: #aaa;
-            margin-bottom: 15px;
-            padding: 10px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 6px;
-        }
-        .scan-type-badge {
-            display: inline-block;
-            background: #4fc3f7;
-            color: #1a1a2e;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            text-transform: uppercase;
-            font-size: 10px;
-        }
         .view-buttons {
             display: flex;
             gap: 6px;
@@ -1068,39 +1045,25 @@ VIEWER_HTML = '''
             margin-bottom: 10px;
         }
         .view-btn {
-            padding: 6px 12px;
+            padding: 8px 14px;
             background: rgba(79,195,247,0.2);
             border: 1px solid #4fc3f7;
             color: #4fc3f7;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 11px;
+            font-size: 12px;
             transition: all 0.2s;
         }
         .view-btn:hover {
             background: rgba(79,195,247,0.4);
         }
-        .view-btn.primary {
+        .view-btn.active {
             background: #4fc3f7;
             color: #1a1a2e;
             font-weight: bold;
         }
-        .view-btn.primary:hover {
+        .view-btn.active:hover {
             background: #81d4fa;
-        }
-        .preset-select {
-            width: 100%;
-            padding: 8px;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid #4fc3f7;
-            color: white;
-            border-radius: 4px;
-            font-size: 12px;
-            margin-bottom: 10px;
-        }
-        .preset-select option {
-            background: #16213e;
-            color: white;
         }
     </style>
 </head>
@@ -1108,93 +1071,99 @@ VIEWER_HTML = '''
     <div id="container">
         <div id="viewer3d">
             <div id="loading">Loading 3D model...</div>
-            <a href="/" class="back-btn">← Change Directory</a>
+            <a href="/" class="back-btn">&larr; Change Directory</a>
             <div id="info">
-                <h2>CT Viewer</h2>
+                <h2>3D CT Viewer</h2>
                 <p style="font-size: 12px; margin: 8px 0;">
                     <b>3D Controls:</b><br>
-                    • Left-click + drag: Rotate<br>
-                    • Right-click + drag: Pan<br>
-                    • Scroll: Zoom<br>
-                    • Right-click model: Set planes
+                    &bull; Left-click + drag: Rotate<br>
+                    &bull; Right-click + drag: Pan<br>
+                    &bull; Scroll wheel: Zoom<br><br>
+                    <b>Set Cross-Section Location:</b><br>
+                    &bull; Right-click on the 3D model to set all three cross-section planes to that point
                 </p>
             </div>
         </div>
         <div id="sidebar">
-            <h2 class="sidebar-title">Cross-Sectional Views</h2>
-
-            <div class="dir-info">
-                <b>Directory:</b> {{ directory_name }}<br>
-                <b>Format:</b> {{ image_type | upper }}<br>
-                <b>Slices:</b> {{ slice_count }}<br>
-                <b>Detected Type:</b> <span class="scan-type-badge">{{ scan_type }}</span>
-            </div>
+            <h2 class="sidebar-title">Cross-Sectional X-Ray Views</h2>
 
             <div class="controls-section">
                 <h3>3D View Controls</h3>
-                <div class="view-buttons">
-                    <button class="view-btn primary" onclick="resetView()">Reset View</button>
-                    <button class="view-btn" onclick="setView('front')">Front</button>
-                    <button class="view-btn" onclick="setView('back')">Back</button>
-                    <button class="view-btn" onclick="setView('left')">Left</button>
-                    <button class="view-btn" onclick="setView('right')">Right</button>
-                    <button class="view-btn" onclick="setView('top')">Top</button>
+                <div class="view-buttons" id="view-buttons">
+                    <button class="view-btn" id="btn-reset" onclick="resetView()">Reset</button>
+                    <button class="view-btn active" id="btn-front" onclick="setView('front')">Front</button>
+                    <button class="view-btn" id="btn-back" onclick="setView('back')">Back</button>
+                    <button class="view-btn" id="btn-left" onclick="setView('left')">Left</button>
+                    <button class="view-btn" id="btn-right" onclick="setView('right')">Right</button>
+                    <button class="view-btn" id="btn-top" onclick="setView('top')">Top</button>
                 </div>
                 <p style="font-size: 11px; color: #aaa; margin: 5px 0 0 0;">Click a view or drag to rotate freely</p>
             </div>
 
+            <div class="help-box">
+                <h3>How to Navigate Cross-Sections</h3>
+                <p><b>Each slider below controls a different cutting plane through your scan:</b></p>
+                <ul>
+                    <li><b>Axial</b> - Horizontal slices (like looking down from above)</li>
+                    <li><b>Sagittal</b> - Vertical slices from left to right</li>
+                    <li><b>Coronal</b> - Vertical slices from front to back</li>
+                </ul>
+                <p>Drag any slider to move through the scan. The colored planes in the 3D view show where each slice is located.</p>
+            </div>
+
             <div class="controls-section">
                 <h3>Image Contrast</h3>
-                <label>Preset:</label>
-                <select class="preset-select" id="preset-select" onchange="applyPreset(this.value)">
-                    <option value="custom" {% if scan_type == 'auto' %}selected{% endif %}>Custom</option>
-                    <option value="dental" {% if scan_type == 'dental' %}selected{% endif %}>Dental / Bone (HU 400/2000)</option>
-                    <option value="bone" {% if scan_type == 'bone' %}selected{% endif %}>Bone (HU 400/2000)</option>
-                    <option value="soft_tissue">Soft Tissue (HU 40/400)</option>
-                    <option value="lung" {% if scan_type == 'lung' %}selected{% endif %}>Lung (HU -600/1500)</option>
-                </select>
-                <label>Brightness: <span id="wc-val">{{ window_center }}</span></label>
-                <input type="range" id="window-center" min="-1000" max="2000" value="{{ window_center }}">
-                <label>Contrast: <span id="ww-val">{{ window_width }}</span></label>
-                <input type="range" id="window-width" min="100" max="4000" value="{{ window_width }}">
+                <label>Brightness (Window Center): <span id="wc-val">400</span> HU</label>
+                <input type="range" id="window-center" min="-500" max="2000" value="400">
+                <label>Contrast (Window Width): <span id="ww-val">2000</span> HU</label>
+                <input type="range" id="window-width" min="100" max="4000" value="2000">
             </div>
 
             <div class="slice-panel">
                 <h3>
                     <span class="plane-color" style="background: #4fc3f7;"></span>
-                    Axial View
+                    Axial View (Top-Down)
                     <span class="current-slice" id="axial-pos">0</span>
                 </h3>
-                <img id="axial-img" src="" alt="Axial">
+                <img id="axial-img" src="" alt="Axial slice">
                 <div class="slider-container">
                     <input type="range" id="axial-slider" min="0" max="100" value="50">
-                    <div class="slider-label"><span>Bottom</span><span>Top</span></div>
+                    <div class="slider-label">
+                        <span>Chin / Bottom</span>
+                        <span>Top of Head</span>
+                    </div>
                 </div>
             </div>
 
             <div class="slice-panel">
                 <h3>
                     <span class="plane-color" style="background: #ff6b6b;"></span>
-                    Sagittal View
+                    Sagittal View (Side)
                     <span class="current-slice" id="sagittal-pos">0</span>
                 </h3>
-                <img id="sagittal-img" src="" alt="Sagittal">
+                <img id="sagittal-img" src="" alt="Sagittal slice">
                 <div class="slider-container">
                     <input type="range" id="sagittal-slider" min="0" max="100" value="50">
-                    <div class="slider-label"><span>Left</span><span>Right</span></div>
+                    <div class="slider-label">
+                        <span>Left Side</span>
+                        <span>Right Side</span>
+                    </div>
                 </div>
             </div>
 
             <div class="slice-panel">
                 <h3>
                     <span class="plane-color" style="background: #6bff6b;"></span>
-                    Coronal View
+                    Coronal View (Front)
                     <span class="current-slice" id="coronal-pos">0</span>
                 </h3>
-                <img id="coronal-img" src="" alt="Coronal">
+                <img id="coronal-img" src="" alt="Coronal slice">
                 <div class="slider-container">
                     <input type="range" id="coronal-slider" min="0" max="100" value="50">
-                    <div class="slider-label"><span>Back</span><span>Front</span></div>
+                    <div class="slider-label">
+                        <span>Back of Head</span>
+                        <span>Face / Front</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1204,27 +1173,19 @@ VIEWER_HTML = '''
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <script>
-        let scene, camera, renderer, controls, mesh;
-        let volumeShape = {{ shape | tojson }};
-        let planeRanges = {{ plane_ranges | tojson }};  // Half-extent for each axis (axial, coronal, sagittal)
-        let windowCenter = {{ window_center }};
-        let windowWidth = {{ window_width }};
-        let meshColor = {{ mesh_color }};
+        let scene, camera, renderer, controls;
+        let boneMesh;
+        let volumeShape = null;
+        let planeRanges = [50, 50, 50];  // Half-extent for each axis (axial, coronal, sagittal)
+        let windowCenter = 400;
+        let windowWidth = 2000;
         let raycaster, mouse;
         let axialPlane, sagittalPlane, coronalPlane;
         let planeGroup;  // Group to hold planes with same rotation as mesh
 
-        // Preset definitions for window/level
-        const presets = {
-            dental: { wc: 400, ww: 2000 },
-            bone: { wc: 400, ww: 2000 },
-            soft_tissue: { wc: 40, ww: 400 },
-            lung: { wc: -600, ww: 1500 },
-            custom: null
-        };
-
         function init() {
             const container = document.getElementById('viewer3d');
+
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a2e);
 
@@ -1239,12 +1200,16 @@ VIEWER_HTML = '''
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
-            controls.target.set(0, 0, 0);  // Ensure rotation around center
+            controls.rotateSpeed = 0.8;
+            // Make rotation more intuitive - screen space panning and standard rotation
+            controls.screenSpacePanning = true;
 
             scene.add(new THREE.AmbientLight(0x404040, 0.5));
+
             const light1 = new THREE.DirectionalLight(0xffffff, 0.8);
             light1.position.set(1, 1, 1);
             scene.add(light1);
+
             const light2 = new THREE.DirectionalLight(0xffffff, 0.5);
             light2.position.set(-1, -1, -1);
             scene.add(light2);
@@ -1257,9 +1222,11 @@ VIEWER_HTML = '''
 
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
+
             renderer.domElement.addEventListener('contextmenu', onRightClick);
 
             loadMesh();
+            loadVolumeInfo();
             setupSliders();
 
             window.addEventListener('resize', onWindowResize);
@@ -1267,77 +1234,107 @@ VIEWER_HTML = '''
         }
 
         // View control functions
+        // Camera positions are dynamically calculated based on mesh orientation analysis.
+        // The server analyzes the mesh geometry (using PCA and bounding box analysis)
+        // and DICOM metadata to determine anatomical directions, then provides
+        // viewPositions and viewUps for each standard view.
+
+        function highlightButton(viewName) {
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('#view-buttons .view-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            // Add active class to the selected button
+            const activeBtn = document.getElementById('btn-' + viewName);
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+            }
+        }
+
         function resetView() {
-            // Reset camera to default front-facing position
-            camera.position.set(0, 0, 200);
-            camera.up.set(0, 1, 0);
+            // Reset to default front-facing view with head at top
+            // Use dynamic orientation from mesh analysis if available
+            if (meshOrientation && meshOrientation.viewPositions && meshOrientation.viewPositions.front) {
+                const pos = meshOrientation.viewPositions.front;
+                const up = meshOrientation.viewUps.front;
+                camera.position.set(pos[0], pos[1], pos[2]);
+                camera.up.set(up[0], up[1], up[2]);
+            } else {
+                // Fallback to default for standard dental CT orientation
+                camera.position.set(0, 173, -100);
+                camera.up.set(1, 0, 0);
+            }
             controls.target.set(0, 0, 0);
             controls.update();
+            highlightButton('front');  // Reset goes to front view
         }
 
         function setView(view) {
-            const distance = 200;
             controls.target.set(0, 0, 0);
+
+            // Use dynamic orientation from mesh analysis if available
+            if (meshOrientation && meshOrientation.viewPositions && meshOrientation.viewPositions[view]) {
+                const pos = meshOrientation.viewPositions[view];
+                const up = meshOrientation.viewUps[view];
+                camera.position.set(pos[0], pos[1], pos[2]);
+                camera.up.set(up[0], up[1], up[2]);
+                controls.update();
+                highlightButton(view);
+                return;
+            }
+
+            // Fallback to hardcoded positions for standard dental CT orientation
+            const d = 200;
 
             switch(view) {
                 case 'front':
-                    camera.position.set(0, 0, distance);
-                    camera.up.set(0, 1, 0);
+                    camera.position.set(0, 0.866 * d, -0.5 * d);
+                    camera.up.set(1, 0, 0);
                     break;
                 case 'back':
-                    camera.position.set(0, 0, -distance);
-                    camera.up.set(0, 1, 0);
+                    camera.position.set(0, -0.866 * d, 0.5 * d);
+                    camera.up.set(1, 0, 0);
                     break;
                 case 'left':
-                    camera.position.set(-distance, 0, 0);
-                    camera.up.set(0, 1, 0);
+                    camera.position.set(0, 0.5 * d, 0.866 * d);
+                    camera.up.set(1, 0, 0);
                     break;
                 case 'right':
-                case 'side':  // Keep 'side' for backward compatibility
-                    camera.position.set(distance, 0, 0);
-                    camera.up.set(0, 1, 0);
+                    camera.position.set(0, -0.5 * d, -0.866 * d);
+                    camera.up.set(1, 0, 0);
                     break;
                 case 'top':
-                    camera.position.set(0, distance, 0);
-                    camera.up.set(0, 0, -1);
+                    camera.position.set(d, 0, 0);
+                    camera.up.set(0, -0.866, 0.5);
                     break;
                 case 'bottom':
-                    camera.position.set(0, -distance, 0);
-                    camera.up.set(0, 0, 1);
+                    // Look up at bottom - camera below along -X
+                    camera.position.set(-d, 0, 0);  // (-200, 0, 0)
+                    camera.up.set(0, -0.866, 0.5);
                     break;
             }
             controls.update();
-        }
-
-        function applyPreset(presetName) {
-            if (presetName === 'custom') return;
-
-            const preset = presets[presetName];
-            if (preset) {
-                windowCenter = preset.wc;
-                windowWidth = preset.ww;
-                document.getElementById('window-center').value = windowCenter;
-                document.getElementById('window-width').value = windowWidth;
-                document.getElementById('wc-val').textContent = windowCenter;
-                document.getElementById('ww-val').textContent = windowWidth;
-                updateAllSlices();
-            }
+            highlightButton(view);
         }
 
         function onRightClick(event) {
             event.preventDefault();
-            if (!mesh || !volumeShape) return;
+
+            if (!boneMesh || !volumeShape) return;
 
             const container = document.getElementById('viewer3d');
             const rect = container.getBoundingClientRect();
+
             mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObject(mesh);
+            const intersects = raycaster.intersectObject(boneMesh);
 
             if (intersects.length > 0) {
                 const point = intersects[0].point;
+
+                // Map 3D point back to volume indices
+                // Account for mesh rotation
                 const rotatedPoint = point.clone();
                 rotatedPoint.applyAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 6);
 
@@ -1360,6 +1357,7 @@ VIEWER_HTML = '''
                 updateSlice('axial', axialIdx);
                 updateSlice('coronal', coronalIdx);
                 updateSlice('sagittal', sagittalIdx);
+
                 updatePlaneHelpers(axialIdx, coronalIdx, sagittalIdx);
             }
         }
@@ -1389,8 +1387,14 @@ VIEWER_HTML = '''
 
             // Axial (blue) - HORIZONTAL slice dividing top/bottom
             // Perpendicular to X (mesh local), moves along X
-            const axialMat = new THREE.MeshBasicMaterial({color: 0x4fc3f7, transparent: true, opacity: 0.25, side: THREE.DoubleSide});
-            axialPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), axialMat);
+            const axialGeo = new THREE.PlaneGeometry(size, size);
+            const axialMat = new THREE.MeshBasicMaterial({
+                color: 0x4fc3f7,
+                transparent: true,
+                opacity: 0.25,
+                side: THREE.DoubleSide
+            });
+            axialPlane = new THREE.Mesh(axialGeo, axialMat);
             // Rotate to be perpendicular to X axis (in YZ plane)
             axialPlane.rotation.y = Math.PI / 2;
             // Map slider: 0 = bottom, max = top
@@ -1400,8 +1404,14 @@ VIEWER_HTML = '''
 
             // Sagittal (red) - VERTICAL slice dividing left/right
             // Perpendicular to Z (mesh local), moves along Z
-            const sagMat = new THREE.MeshBasicMaterial({color: 0xff6b6b, transparent: true, opacity: 0.25, side: THREE.DoubleSide});
-            sagittalPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), sagMat);
+            const sagGeo = new THREE.PlaneGeometry(size, size);
+            const sagMat = new THREE.MeshBasicMaterial({
+                color: 0xff6b6b,
+                transparent: true,
+                opacity: 0.25,
+                side: THREE.DoubleSide
+            });
+            sagittalPlane = new THREE.Mesh(sagGeo, sagMat);
             // Default PlaneGeometry is in XY plane, perpendicular to Z - no rotation needed
             // Map slider: 0 = one side, max = other side
             const sagPos = (sagittal / Math.max(volumeShape[2] - 1, 1) - 0.5) * sagittalRange;
@@ -1410,8 +1420,14 @@ VIEWER_HTML = '''
 
             // Coronal (green) - VERTICAL slice dividing front/back
             // Perpendicular to Y (mesh local), moves along Y
-            const corMat = new THREE.MeshBasicMaterial({color: 0x6bff6b, transparent: true, opacity: 0.25, side: THREE.DoubleSide});
-            coronalPlane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), corMat);
+            const corGeo = new THREE.PlaneGeometry(size, size);
+            const corMat = new THREE.MeshBasicMaterial({
+                color: 0x6bff6b,
+                transparent: true,
+                opacity: 0.25,
+                side: THREE.DoubleSide
+            });
+            coronalPlane = new THREE.Mesh(corGeo, corMat);
             // Rotate to be perpendicular to Y axis (in XZ plane)
             coronalPlane.rotation.x = Math.PI / 2;
             // Map slider: 0 = back, max = front
@@ -1424,68 +1440,73 @@ VIEWER_HTML = '''
 
         function loadMesh() {
             fetch('/mesh_data')
-                .then(r => r.json())
+                .then(response => response.json())
                 .then(data => {
                     document.getElementById('loading').style.display = 'none';
-                    if (data.error) return;
 
                     const geometry = new THREE.BufferGeometry();
                     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(data.vertices), 3));
                     geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(data.faces), 1));
                     geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(data.normals), 3));
 
-                    // Use mesh color from preset (passed from server, or from data)
-                    const color = data.color || meshColor || 0xcccccc;
-
                     const material = new THREE.MeshPhongMaterial({
-                        color: color,
+                        color: 0xf5f5dc,
                         specular: 0x222222,
                         shininess: 25,
                         side: THREE.DoubleSide
                     });
 
-                    mesh = new THREE.Mesh(geometry, material);
-                    // Flip mesh so head/top is at top (rotate 180 degrees around X)
-                    // Then tilt slightly for better 3D viewing
-                    mesh.rotation.x = Math.PI - Math.PI / 6;
+                    boneMesh = new THREE.Mesh(geometry, material);
 
-                    // Center the mesh properly
-                    geometry.computeBoundingBox();
-                    const box = geometry.boundingBox;
-                    const center = new THREE.Vector3();
-                    box.getCenter(center);
-                    geometry.translate(-center.x, -center.y, -center.z);
+                    // Base rotation: flip mesh so head/top is at top, then tilt for 3D viewing
+                    const baseTilt = Math.PI / 6;
+                    boneMesh.rotation.x = Math.PI - baseTilt;
 
-                    scene.add(mesh);
+                    scene.add(boneMesh);
 
-                    // Store orientation data for camera adjustment
-                    meshOrientation = data.orientation || {rotateX: 0, rotateY: 0, rotateZ: 0};
+                    // Store orientation data for camera positioning
+                    meshOrientation = data.orientation || null;
                     console.log('Mesh orientation analysis:', meshOrientation);
 
-                    // If model appears to be facing away, rotate camera to view from back
-                    if (meshOrientation.rotateY !== 0) {
-                        const distance = 200;
-                        camera.position.set(0, 0, -distance);
-                        camera.up.set(0, 1, 0);
-                        controls.target.set(0, 0, 0);
-                        controls.update();
-                        console.log('Camera repositioned to view front of model');
-                    } else {
-                        // Set camera to look at center
-                        controls.target.set(0, 0, 0);
-                        controls.update();
+                    // Set initial camera position using dynamic orientation
+                    if (meshOrientation && meshOrientation.viewPositions) {
+                        console.log('Using dynamic view positions from mesh analysis');
+                        console.log('  Head direction:', meshOrientation.headDirection);
+                        console.log('  Front direction:', meshOrientation.frontDirection);
+                        console.log('  Primary axis:', meshOrientation.primaryAxis);
+                    }
+                    // Always start with front view
+                    setView('front');
+                })
+                .catch(error => {
+                    document.getElementById('loading').textContent = 'Error: ' + error;
+                });
+        }
+
+        function loadVolumeInfo() {
+            fetch('/volume_info')
+                .then(response => response.json())
+                .then(data => {
+                    volumeShape = data.shape;
+                    // Get plane ranges from server (matches mesh scaling)
+                    if (data.plane_ranges) {
+                        planeRanges = data.plane_ranges;
                     }
 
-                    // Initialize planes and slices
-                    const mid = [Math.floor(volumeShape[0]/2), Math.floor(volumeShape[1]/2), Math.floor(volumeShape[2]/2)];
                     document.getElementById('axial-slider').max = volumeShape[0] - 1;
                     document.getElementById('sagittal-slider').max = volumeShape[2] - 1;
                     document.getElementById('coronal-slider').max = volumeShape[1] - 1;
-                    document.getElementById('axial-slider').value = mid[0];
-                    document.getElementById('sagittal-slider').value = mid[2];
-                    document.getElementById('coronal-slider').value = mid[1];
+
+                    const axialMid = Math.floor(volumeShape[0] / 2);
+                    const sagMid = Math.floor(volumeShape[2] / 2);
+                    const corMid = Math.floor(volumeShape[1] / 2);
+
+                    document.getElementById('axial-slider').value = axialMid;
+                    document.getElementById('sagittal-slider').value = sagMid;
+                    document.getElementById('coronal-slider').value = corMid;
+
                     updateAllSlices();
-                    updatePlaneHelpers(mid[0], mid[1], mid[2]);
+                    updatePlaneHelpers(axialMid, corMid, sagMid);
                 });
         }
 
@@ -1504,13 +1525,11 @@ VIEWER_HTML = '''
             document.getElementById('window-center').addEventListener('input', function() {
                 windowCenter = parseInt(this.value);
                 document.getElementById('wc-val').textContent = windowCenter;
-                document.getElementById('preset-select').value = 'custom';  // Switch to custom when manually adjusted
                 updateAllSlices();
             });
             document.getElementById('window-width').addEventListener('input', function() {
                 windowWidth = parseInt(this.value);
                 document.getElementById('ww-val').textContent = windowWidth;
-                document.getElementById('preset-select').value = 'custom';  // Switch to custom when manually adjusted
                 updateAllSlices();
             });
         }
@@ -1518,7 +1537,7 @@ VIEWER_HTML = '''
         function updateSlice(axis, index) {
             document.getElementById(axis + '-pos').textContent = index;
             fetch(`/slice/${axis}/${index}?wc=${windowCenter}&ww=${windowWidth}`)
-                .then(r => r.json())
+                .then(response => response.json())
                 .then(data => {
                     document.getElementById(axis + '-img').src = 'data:image/png;base64,' + data.image;
                 });
@@ -1549,25 +1568,70 @@ VIEWER_HTML = '''
 </html>
 '''
 
-# ============== Routes ==============
+def get_folder_info(path):
+    """Get list of subfolders and count of image files in a directory."""
+    folders = []
+    image_count = 0
+
+    try:
+        for item in sorted(os.listdir(path)):
+            item_path = os.path.join(path, item)
+            if os.path.isdir(item_path) and not item.startswith('.'):
+                # Check if this folder has image files
+                try:
+                    files = os.listdir(item_path)
+                    dcm_files = [f for f in files if f.lower().endswith('.dcm')]
+                    jpg_files = [f for f in files if f.lower().endswith(('.jpg', '.jpeg'))]
+                    png_files = [f for f in files if f.lower().endswith('.png')]
+                    total_images = len(dcm_files) + len(jpg_files) + len(png_files)
+                    folders.append({
+                        'name': item,
+                        'path': item_path,
+                        'has_dcm': total_images > 0,
+                        'dcm_count': total_images
+                    })
+                except PermissionError:
+                    folders.append({
+                        'name': item,
+                        'path': item_path,
+                        'has_dcm': False,
+                        'dcm_count': 0
+                    })
+            elif item.lower().endswith(('.dcm', '.jpg', '.jpeg', '.png')):
+                image_count += 1
+    except PermissionError:
+        pass
+
+    return folders, image_count
+
 
 @app.route('/')
 def index():
     """Redirect to folder browser."""
     return redirect(url_for('browse'))
 
+
 @app.route('/browse')
 def browse():
     """Show folder browser."""
+    # Get path from query string, default to user's home or a reasonable start
     path = request.args.get('path', '')
+
     if not path:
-        # Default to parent of script directory
+        # Start at the script's parent directory (Dental folder)
         path = str(Path(__file__).parent.parent)
+
+    # Ensure path exists
     if not os.path.isdir(path):
         path = str(Path.home())
 
+    # Get parent path
     parent_path = str(Path(path).parent) if path != '/' else None
+
+    # Get folder contents
     folders, dcm_count = get_folder_info(path)
+
+    # Get recent directories
     recent = load_recent_directories()
 
     return render_template_string(
@@ -1580,150 +1644,143 @@ def browse():
         error=None
     )
 
+
 @app.route('/load', methods=['POST'])
 def load_directory():
-    global current_volume, current_spacing, current_shape, current_mesh, current_directory, current_scan_type
+    """Load image files from specified directory."""
+    global mesh_data, volume_data, volume_spacing, volume_shape, current_directory
 
     path = request.form.get('path', '').strip()
 
-    def error_response(error_msg, browse_path=None):
+    # Helper to render error with all required template variables
+    def render_error(error_msg, browse_path=None):
         if not browse_path:
             browse_path = str(Path(__file__).parent.parent)
         parent_path = str(Path(browse_path).parent) if browse_path != '/' else None
         folders, dcm_count = get_folder_info(browse_path)
-        return render_template_string(
-            DIRECTORY_PICKER_HTML,
-            current_path=browse_path,
-            parent_path=parent_path,
-            folders=folders,
-            dcm_count=dcm_count,
-            recent=load_recent_directories(),
-            error=error_msg
-        )
+        return render_template_string(DIRECTORY_PICKER_HTML,
+                                      current_path=browse_path,
+                                      parent_path=parent_path,
+                                      folders=folders,
+                                      dcm_count=dcm_count,
+                                      recent=load_recent_directories(),
+                                      error=error_msg)
 
     if not path:
-        return error_response("Please enter a path")
+        return render_error("Please enter a path")
 
     if not os.path.isdir(path):
-        return error_response(f"Directory not found: {path}")
+        return render_error(f"Directory not found: {path}")
 
-    img_type, count = detect_image_type(path)
+    # Check for supported image files
+    img_type, img_count = detect_image_type(path)
     if img_type is None:
-        return error_response("No supported image files found (DICOM, JPG, or PNG)", path)
+        return render_error("No supported image files found (DICOM, JPG, or PNG)", path)
 
-    # Load the volume
     try:
-        current_volume, current_spacing = load_volume(path)
-        current_shape = list(current_volume.shape)
+        print(f"Loading {img_type.upper()} directory: {path}")
+        volume_data, volume_spacing, dicom_orientation = load_volume(path)
+        volume_shape = list(volume_data.shape)
         current_directory = path
 
-        # Detect scan type for optimal settings
-        dicom_meta = current_dicom_metadata if img_type == 'dicom' else None
-        current_scan_type = detect_scan_type(path, current_shape, dicom_meta)
+        print("Creating 3D mesh...")
+        # Use threshold=None for auto-detection (important for JPG/PNG)
+        verts, faces, normals = create_mesh(volume_data, volume_spacing, threshold=None, keep_n_largest=3)
 
-        # Create mesh with detected preset
-        verts, faces, normals = create_mesh(current_volume, current_spacing, preset_name=current_scan_type)
-        if verts is not None:
-            # Analyze mesh orientation for auto-positioning
-            print("Analyzing mesh orientation...")
-            orientation = analyze_mesh_orientation(verts)
+        # Analyze mesh orientation for auto-positioning (pass DICOM metadata if available)
+        print("Analyzing mesh orientation...")
+        orientation = analyze_mesh_orientation(verts, dicom_orientation)
 
-            preset = SCAN_PRESETS.get(current_scan_type, SCAN_PRESETS['auto'])
-            current_mesh = {
-                'vertices': verts.flatten().tolist(),
-                'faces': faces.flatten().tolist(),
-                'normals': normals.flatten().tolist(),
-                'color': preset['mesh_color'],
-                'orientation': orientation
-            }
-        else:
-            current_mesh = None
+        mesh_data = {
+            'vertices': verts.flatten().tolist(),
+            'faces': faces.flatten().tolist(),
+            'normals': normals.flatten().tolist(),
+            'orientation': orientation
+        }
 
-        # Save to recent
+        # Save to recent directories
         add_recent_directory(path)
+
+        print("Ready!")
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return error_response(f"Error loading: {str(e)}", path)
+        return render_error(f"Error loading: {str(e)}", path)
 
     return redirect(url_for('viewer'))
 
+
 @app.route('/viewer')
 def viewer():
-    if current_volume is None:
+    """Show the 3D viewer."""
+    if volume_data is None:
         return redirect(url_for('index'))
+    return render_template_string(HTML_TEMPLATE)
 
-    img_type, count = detect_image_type(current_directory)
-    dir_name = os.path.basename(current_directory)
 
-    # Get preset settings for detected scan type
-    preset = SCAN_PRESETS.get(current_scan_type, SCAN_PRESETS['auto'])
+@app.route('/mesh_data')
+def get_mesh_data():
+    global mesh_data
+    if mesh_data is None:
+        return jsonify({'error': 'Mesh not loaded'}), 500
+    return jsonify(mesh_data)
 
-    # Determine window settings - use preset if available, otherwise auto-calculate
-    if preset['window_center'] is not None:
-        window_center = preset['window_center']
-        window_width = preset['window_width']
-    else:
-        vol_min, vol_max = int(current_volume.min()), int(current_volume.max())
-        window_center = (vol_min + vol_max) // 2
-        window_width = vol_max - vol_min
 
-    mesh_color = preset['mesh_color']
+@app.route('/volume_info')
+def get_volume_info():
+    global volume_shape, volume_spacing
+    if volume_shape is None:
+        return jsonify({'error': 'No volume loaded'}), 500
 
-    # Calculate plane ranges for accurate cross-section positioning
+    # Calculate plane ranges based on volume dimensions and spacing
     # These match the scaling used in create_mesh()
-    spacing = current_spacing if current_spacing else (1, 1, 1)
+    spacing = volume_spacing if volume_spacing else (1, 1, 1)
     vol_extent = [
-        current_shape[0] * spacing[0],
-        current_shape[1] * spacing[1],
-        current_shape[2] * spacing[2]
+        volume_shape[0] * spacing[0],
+        volume_shape[1] * spacing[1],
+        volume_shape[2] * spacing[2]
     ]
     max_vol_dim = max(vol_extent)
     scale_factor = 100 / max_vol_dim if max_vol_dim > 0 else 1
+
+    # Plane ranges: half the extent in each dimension after scaling
     plane_ranges = [
         vol_extent[0] * scale_factor / 2,  # axial (z) half-range
         vol_extent[1] * scale_factor / 2,  # coronal (y) half-range
         vol_extent[2] * scale_factor / 2   # sagittal (x) half-range
     ]
 
-    return render_template_string(VIEWER_HTML,
-                                  directory_name=dir_name,
-                                  image_type=img_type,
-                                  slice_count=count,
-                                  shape=current_shape,
-                                  plane_ranges=plane_ranges,
-                                  window_center=window_center,
-                                  window_width=window_width,
-                                  scan_type=current_scan_type,
-                                  mesh_color=mesh_color)
+    return jsonify({
+        'shape': volume_shape,
+        'spacing': list(spacing),
+        'plane_ranges': plane_ranges
+    })
 
-@app.route('/mesh_data')
-def mesh_data():
-    if current_mesh is None:
-        return jsonify({'error': 'No mesh available'})
-    return jsonify(current_mesh)
 
 @app.route('/slice/<axis>/<int:index>')
 def get_slice(axis, index):
-    if current_volume is None:
-        return jsonify({'error': 'No volume loaded'})
+    global volume_data
+    if volume_data is None:
+        return jsonify({'error': 'No volume loaded'}), 500
+    wc = request.args.get('wc', 400, type=int)
+    ww = request.args.get('ww', 2000, type=int)
+    image_b64 = get_slice_image(volume_data, axis, index, wc, ww)
+    return jsonify({'image': image_b64})
 
-    wc = request.args.get('wc', 0, type=int)
-    ww = request.args.get('ww', 1000, type=int)
-
-    img = get_slice_image(current_volume, axis, index, wc, ww)
-    return jsonify({'image': img})
 
 def main():
     print("=" * 60)
-    print("CT Viewer - Universal CT/MRI Image Viewer")
+    print("3D Dental CT Viewer")
     print("=" * 60)
     print(f"Open http://localhost:{PORT} in your browser")
-    print("Press Ctrl+C to stop")
+    print("")
+    print("Select a DICOM directory to begin.")
+    print("Press Ctrl+C to stop the server")
     print("=" * 60)
 
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
+
 
 if __name__ == '__main__':
     main()

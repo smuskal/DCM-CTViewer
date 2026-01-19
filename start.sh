@@ -15,6 +15,17 @@ echo "         CT VIEWER FOR MAC"
 echo "========================================"
 echo ""
 
+# Detect architecture for Apple Silicon compatibility
+ARCH_PREFIX=""
+if [[ "$(uname -s)" == "Darwin" ]] && [[ "$(uname -m)" == "arm64" ]]; then
+    ARCH_PREFIX="arch -arm64"
+    echo " Detected: Apple Silicon (arm64)"
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+    echo " Detected: Intel Mac (x86_64)"
+else
+    echo " Detected: Linux"
+fi
+
 # Check if Python 3 is available
 if ! command -v python3 &> /dev/null; then
     echo " ERROR: Python 3 is not installed."
@@ -40,7 +51,7 @@ else
     # Create virtual environment
     echo ""
     echo " Setting up virtual environment (first time only)..."
-    python3 -m venv "$VENV_DIR"
+    $ARCH_PREFIX python3 -m venv "$VENV_DIR"
 
     if [ ! -f "$VENV_DIR/bin/python" ]; then
         echo " ERROR: Failed to create virtual environment."
@@ -52,15 +63,13 @@ else
     PYTHON_CMD="$VENV_DIR/bin/python"
 
     echo " Installing required packages..."
-    "$VENV_DIR"/bin/pip install --upgrade pip > /dev/null 2>&1
-    "$VENV_DIR"/bin/pip install flask pillow numpy scipy scikit-image pydicom pylibjpeg pylibjpeg-libjpeg
+    $ARCH_PREFIX "$VENV_DIR"/bin/pip install --upgrade pip > /dev/null 2>&1
+    $ARCH_PREFIX "$VENV_DIR"/bin/pip install --only-binary :all: -r requirements.txt
 
     if [ $? -ne 0 ]; then
         echo ""
-        echo " ERROR: Failed to install packages."
-        echo " Press Enter to exit..."
-        read
-        exit 1
+        echo " WARNING: Some packages may have failed. Trying without --only-binary..."
+        $ARCH_PREFIX "$VENV_DIR"/bin/pip install -r requirements.txt
     fi
 
     echo ""
@@ -85,8 +94,8 @@ echo "                or press Ctrl+C"
 echo " ----------------------------------------"
 echo ""
 
-# Start server in background
-"$PYTHON_CMD" ct_viewer.py &
+# Start server in background (use arch prefix for Apple Silicon)
+$ARCH_PREFIX "$PYTHON_CMD" ct_viewer.py &
 SERVER_PID=$!
 
 # Wait for server to be ready
