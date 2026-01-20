@@ -905,130 +905,43 @@ HTML_TEMPLATE = '''
             font-family: Arial, sans-serif;
             color: white;
         }
-        #container { display: flex; height: 100vh; }
-        #viewer3d { flex: 1; position: relative; }
-        #sidebar {
-            width: 500px;
-            background: #16213e;
-            padding: 15px;
-            overflow-y: auto;
-            border-left: 2px solid #4fc3f7;
+        #container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            height: 100vh;
+            gap: 2px;
+            background: #0a0a1a;
         }
-        #info {
+        .grid-cell {
+            position: relative;
+            background: #1a1a2e;
+            overflow: hidden;
+        }
+        .cell-header {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.85);
-            padding: 15px;
-            border-radius: 8px;
-            z-index: 100;
-            max-width: 300px;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            padding: 8px 12px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
-        #info h2 { margin-top: 0; color: #4fc3f7; font-size: 16px; }
-        .back-btn {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            z-index: 100;
-            padding: 8px 15px;
-            background: rgba(79,195,247,0.2);
-            border: 1px solid #4fc3f7;
-            color: #4fc3f7;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-            font-size: 13px;
-        }
-        .back-btn:hover { background: rgba(79,195,247,0.4); }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 24px;
-            z-index: 200;
-        }
-        .help-box {
-            background: #0f3460;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            border-left: 3px solid #4fc3f7;
-        }
-        .help-box h3 {
-            margin: 0 0 8px 0;
-            color: #4fc3f7;
-            font-size: 14px;
-        }
-        .help-box p {
-            margin: 5px 0;
-            font-size: 12px;
-            line-height: 1.5;
-        }
-        .help-box ul {
-            margin: 5px 0;
-            padding-left: 20px;
-            font-size: 12px;
-        }
-        .help-box li { margin: 4px 0; }
-        .slice-panel {
-            margin-bottom: 15px;
-            background: #0f3460;
-            padding: 12px;
-            border-radius: 8px;
-        }
-        .slice-panel h3 {
-            margin: 0 0 8px 0;
-            font-size: 13px;
+        .cell-title {
             display: flex;
             align-items: center;
             gap: 8px;
+            font-size: 14px;
+            font-weight: bold;
         }
         .plane-color {
             width: 12px;
             height: 12px;
             border-radius: 2px;
             display: inline-block;
-        }
-        .slice-panel img {
-            width: 100%;
-            border-radius: 4px;
-            background: black;
-        }
-        .slider-container { margin-top: 10px; }
-        .slider-container input { width: 100%; }
-        .slider-label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-            color: #aaa;
-            margin-top: 3px;
-        }
-        h2.sidebar-title {
-            color: #4fc3f7;
-            margin-top: 0;
-            margin-bottom: 15px;
-            font-size: 18px;
-        }
-        .controls-section {
-            background: #0f3460;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
-        .controls-section h3 {
-            margin: 0 0 10px 0;
-            color: #4fc3f7;
-            font-size: 13px;
-        }
-        .controls-section label {
-            display: block;
-            margin-bottom: 3px;
-            font-size: 11px;
-        }
-        .controls-section input[type="range"] {
-            width: 100%;
-            margin-bottom: 8px;
         }
         .current-slice {
             background: #4fc3f7;
@@ -1038,136 +951,316 @@ HTML_TEMPLATE = '''
             font-weight: bold;
             font-size: 12px;
         }
-        .view-buttons {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-bottom: 10px;
-        }
-        .view-btn {
-            padding: 8px 14px;
+        .expand-btn {
+            padding: 4px 10px;
             background: rgba(79,195,247,0.2);
             border: 1px solid #4fc3f7;
             color: #4fc3f7;
             border-radius: 4px;
             cursor: pointer;
+            font-size: 11px;
+        }
+        .expand-btn:hover { background: rgba(79,195,247,0.4); }
+        #viewer3d {
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            bottom: 60px;
+            left: 10px;
+            background: rgba(0,0,0,0.85);
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 280px;
+            font-size: 11px;
+        }
+        #info h2 { margin: 0 0 8px 0; color: #4fc3f7; font-size: 14px; }
+        .back-btn {
+            position: absolute;
+            top: 8px;
+            right: 10px;
+            z-index: 100;
+            padding: 6px 12px;
+            background: rgba(79,195,247,0.2);
+            border: 1px solid #4fc3f7;
+            color: #4fc3f7;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
             font-size: 12px;
+        }
+        .back-btn:hover { background: rgba(79,195,247,0.4); }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            z-index: 200;
+        }
+        .view-buttons {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            z-index: 100;
+            max-width: 280px;
+        }
+        .view-btn {
+            padding: 6px 10px;
+            background: rgba(79,195,247,0.2);
+            border: 1px solid #4fc3f7;
+            color: #4fc3f7;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
             transition: all 0.2s;
         }
-        .view-btn:hover {
-            background: rgba(79,195,247,0.4);
-        }
+        .view-btn:hover { background: rgba(79,195,247,0.4); }
         .view-btn.active {
             background: #4fc3f7;
             color: #1a1a2e;
             font-weight: bold;
         }
-        .view-btn.active:hover {
-            background: #81d4fa;
+        .slice-cell {
+            display: flex;
+            flex-direction: column;
+        }
+        .slice-image-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 45px 10px 10px 10px;
+            background: black;
+        }
+        .slice-image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .slice-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.8);
+            padding: 8px 12px;
+            z-index: 10;
+        }
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .slider-row input[type="range"] {
+            flex: 1;
+        }
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #888;
+            margin-top: 2px;
+        }
+        /* Contrast controls in 3D panel */
+        .contrast-controls {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.85);
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 100;
+            font-size: 11px;
+        }
+        .contrast-controls label {
+            display: block;
+            margin-bottom: 2px;
+        }
+        .contrast-controls input[type="range"] {
+            width: 120px;
+            margin-bottom: 6px;
+        }
+        /* Expanded view modal */
+        .expanded-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            padding: 20px;
+        }
+        .expanded-overlay.show { display: flex; flex-direction: column; }
+        .expanded-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .expanded-title {
+            font-size: 20px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .close-btn {
+            padding: 8px 16px;
+            background: #ff6b6b;
+            border: none;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .expanded-content {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .expanded-content img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .expanded-controls {
+            margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            justify-content: center;
+        }
+        .expanded-controls input[type="range"] {
+            width: 400px;
         }
     </style>
 </head>
 <body>
     <div id="container">
-        <div id="viewer3d">
-            <div id="loading">Loading 3D model...</div>
-            <a href="/" class="back-btn">&larr; Change Directory</a>
-            <div id="info">
-                <h2>3D CT Viewer</h2>
-                <p style="font-size: 12px; margin: 8px 0;">
-                    <b>3D Controls:</b><br>
-                    &bull; Left-click + drag: Rotate<br>
-                    &nbsp;&nbsp;- Drag up/down: Rotate around vertical axis<br>
-                    &nbsp;&nbsp;- Drag left/right: Tilt up/down<br>
-                    &bull; Right-click + drag: Pan<br>
-                    &bull; Scroll wheel: Zoom<br><br>
-                    <b>Set Cross-Section Location:</b><br>
-                    &bull; Right-click on the 3D model to set all three cross-section planes to that point
-                </p>
+        <!-- Top-Left: Axial View -->
+        <div class="grid-cell slice-cell" id="axial-cell">
+            <div class="cell-header">
+                <div class="cell-title">
+                    <span class="plane-color" style="background: #4fc3f7;"></span>
+                    <span>Axial (Top-Down)</span>
+                    <span class="current-slice" id="axial-pos">0</span>
+                </div>
+                <button class="expand-btn" onclick="expandView('axial')">Expand</button>
+            </div>
+            <div class="slice-image-container">
+                <img id="axial-img" src="" alt="Axial slice">
+            </div>
+            <div class="slice-controls">
+                <div class="slider-row">
+                    <input type="range" id="axial-slider" min="0" max="100" value="50">
+                </div>
+                <div class="slider-label">
+                    <span>Chin / Bottom</span>
+                    <span>Top of Head</span>
+                </div>
             </div>
         </div>
-        <div id="sidebar">
-            <h2 class="sidebar-title">Cross-Sectional X-Ray Views</h2>
 
-            <div class="controls-section">
-                <h3>3D View Controls</h3>
-                <div class="view-buttons" id="view-buttons">
-                    <button class="view-btn" id="btn-reset" onclick="resetView()">Reset</button>
-                    <button class="view-btn active" id="btn-front" onclick="setView('front')">Front</button>
-                    <button class="view-btn" id="btn-back" onclick="setView('back')">Back</button>
-                    <button class="view-btn" id="btn-left" onclick="setView('left')">Left</button>
-                    <button class="view-btn" id="btn-right" onclick="setView('right')">Right</button>
-                    <button class="view-btn" id="btn-top" onclick="setView('top')">Top</button>
-                </div>
-                <p style="font-size: 11px; color: #aaa; margin: 5px 0 0 0;">Click a view or drag to rotate freely</p>
+        <!-- Top-Right: 3D Model -->
+        <div class="grid-cell" id="model-cell">
+            <div class="view-buttons" id="view-buttons">
+                <button class="view-btn" id="btn-reset" onclick="resetView()">Reset</button>
+                <button class="view-btn active" id="btn-front" onclick="setView('front')">Front</button>
+                <button class="view-btn" id="btn-back" onclick="setView('back')">Back</button>
+                <button class="view-btn" id="btn-left" onclick="setView('left')">Left</button>
+                <button class="view-btn" id="btn-right" onclick="setView('right')">Right</button>
+                <button class="view-btn" id="btn-top" onclick="setView('top')">Top</button>
             </div>
-
-            <div class="help-box">
-                <h3>How to Navigate Cross-Sections</h3>
-                <p><b>Each slider below controls a different cutting plane through your scan:</b></p>
-                <ul>
-                    <li><b>Axial</b> - Horizontal slices (like looking down from above)</li>
-                    <li><b>Sagittal</b> - Vertical slices from left to right</li>
-                    <li><b>Coronal</b> - Vertical slices from front to back</li>
-                </ul>
-                <p>Drag any slider to move through the scan. The colored planes in the 3D view show where each slice is located.</p>
+            <a href="/" class="back-btn">&larr; Change Directory</a>
+            <div id="viewer3d">
+                <div id="loading">Loading 3D model...</div>
             </div>
-
-            <div class="controls-section">
-                <h3>Image Contrast</h3>
-                <label>Brightness (Window Center): <span id="wc-val">400</span> HU</label>
+            <div id="info">
+                <h2>Controls</h2>
+                <b>3D:</b> Left-drag: Rotate | Right-drag: Pan | Scroll: Zoom<br>
+                <b>Cross-sections:</b> Right-click on model to set slice position
+            </div>
+            <div class="contrast-controls">
+                <label>Brightness: <span id="wc-val">400</span></label>
                 <input type="range" id="window-center" min="-500" max="2000" value="400">
-                <label>Contrast (Window Width): <span id="ww-val">2000</span> HU</label>
+                <label>Contrast: <span id="ww-val">2000</span></label>
                 <input type="range" id="window-width" min="100" max="4000" value="2000">
             </div>
+        </div>
 
-            <div class="slice-panel">
-                <h3>
-                    <span class="plane-color" style="background: #4fc3f7;"></span>
-                    Axial View (Top-Down)
-                    <span class="current-slice" id="axial-pos">0</span>
-                </h3>
-                <img id="axial-img" src="" alt="Axial slice">
-                <div class="slider-container">
-                    <input type="range" id="axial-slider" min="0" max="100" value="50">
-                    <div class="slider-label">
-                        <span>Chin / Bottom</span>
-                        <span>Top of Head</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="slice-panel">
-                <h3>
+        <!-- Bottom-Left: Sagittal View -->
+        <div class="grid-cell slice-cell" id="sagittal-cell">
+            <div class="cell-header">
+                <div class="cell-title">
                     <span class="plane-color" style="background: #ff6b6b;"></span>
-                    Sagittal View (Side)
+                    <span>Sagittal (Side)</span>
                     <span class="current-slice" id="sagittal-pos">0</span>
-                </h3>
+                </div>
+                <button class="expand-btn" onclick="expandView('sagittal')">Expand</button>
+            </div>
+            <div class="slice-image-container">
                 <img id="sagittal-img" src="" alt="Sagittal slice">
-                <div class="slider-container">
+            </div>
+            <div class="slice-controls">
+                <div class="slider-row">
                     <input type="range" id="sagittal-slider" min="0" max="100" value="50">
-                    <div class="slider-label">
-                        <span>Left Side</span>
-                        <span>Right Side</span>
-                    </div>
+                </div>
+                <div class="slider-label">
+                    <span>Left Side</span>
+                    <span>Right Side</span>
                 </div>
             </div>
+        </div>
 
-            <div class="slice-panel">
-                <h3>
+        <!-- Bottom-Right: Coronal View -->
+        <div class="grid-cell slice-cell" id="coronal-cell">
+            <div class="cell-header">
+                <div class="cell-title">
                     <span class="plane-color" style="background: #6bff6b;"></span>
-                    Coronal View (Front)
+                    <span>Coronal (Front)</span>
                     <span class="current-slice" id="coronal-pos">0</span>
-                </h3>
+                </div>
+                <button class="expand-btn" onclick="expandView('coronal')">Expand</button>
+            </div>
+            <div class="slice-image-container">
                 <img id="coronal-img" src="" alt="Coronal slice">
-                <div class="slider-container">
+            </div>
+            <div class="slice-controls">
+                <div class="slider-row">
                     <input type="range" id="coronal-slider" min="0" max="100" value="50">
-                    <div class="slider-label">
-                        <span>Back of Head</span>
-                        <span>Face / Front</span>
-                    </div>
+                </div>
+                <div class="slider-label">
+                    <span>Back of Head</span>
+                    <span>Face / Front</span>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Expanded View Overlay -->
+    <div id="expanded-overlay" class="expanded-overlay">
+        <div class="expanded-header">
+            <div class="expanded-title">
+                <span class="plane-color" id="expanded-color"></span>
+                <span id="expanded-title-text">View</span>
+                <span class="current-slice" id="expanded-pos">0</span>
+            </div>
+            <button class="close-btn" onclick="closeExpanded()">Close</button>
+        </div>
+        <div class="expanded-content">
+            <img id="expanded-img" src="" alt="Expanded slice">
+        </div>
+        <div class="expanded-controls">
+            <input type="range" id="expanded-slider" min="0" max="100" value="50">
         </div>
     </div>
 
@@ -1186,16 +1279,17 @@ HTML_TEMPLATE = '''
         let planeGroup;  // Group to hold planes with same rotation as mesh
 
         function init() {
+            const modelCell = document.getElementById('model-cell');
             const container = document.getElementById('viewer3d');
 
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a2e);
 
-            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(75, modelCell.clientWidth / modelCell.clientHeight, 0.1, 1000);
             camera.position.set(0, 0, 200);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setSize(modelCell.clientWidth, modelCell.clientHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
             container.appendChild(renderer.domElement);
 
@@ -1203,7 +1297,6 @@ HTML_TEMPLATE = '''
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
             controls.rotateSpeed = 0.8;
-            // Make rotation more intuitive - screen space panning and standard rotation
             controls.screenSpacePanning = true;
 
             scene.add(new THREE.AmbientLight(0x404040, 0.5));
@@ -1219,7 +1312,8 @@ HTML_TEMPLATE = '''
             // Create plane group with same rotation as mesh
             // This ensures planes visually align with the rotated mesh
             planeGroup = new THREE.Group();
-            planeGroup.rotation.x = Math.PI - Math.PI / 6;  // Same as mesh rotation
+            const baseTilt = Math.PI - Math.PI / 6;
+            planeGroup.rotation.x = baseTilt;
             scene.add(planeGroup);
 
             raycaster = new THREE.Raycaster();
@@ -1253,21 +1347,8 @@ HTML_TEMPLATE = '''
         }
 
         function resetView() {
-            // Reset to default front-facing view with head at top
-            // Use dynamic orientation from mesh analysis if available
-            if (meshOrientation && meshOrientation.viewPositions && meshOrientation.viewPositions.front) {
-                const pos = meshOrientation.viewPositions.front;
-                const up = meshOrientation.viewUps.front;
-                camera.position.set(pos[0], pos[1], pos[2]);
-                camera.up.set(up[0], up[1], up[2]);
-            } else {
-                // Fallback to default for standard dental CT orientation
-                camera.position.set(0, 173, -100);
-                camera.up.set(1, 0, 0);
-            }
-            controls.target.set(0, 0, 0);
-            controls.update();
-            highlightButton('front');  // Reset goes to front view
+            // Reset to front view
+            setView('front');
         }
 
         function setView(view) {
@@ -1457,9 +1538,11 @@ HTML_TEMPLATE = '''
 
                     boneMesh = new THREE.Mesh(geometry, material);
 
-                    // Base rotation: flip mesh so head/top is at top, then tilt for 3D viewing
-                    const baseTilt = Math.PI / 6;
-                    boneMesh.rotation.x = Math.PI - baseTilt;
+                    // Apply rotation to orient the mesh for viewing
+                    // Original mesh: X=head-to-toe, Y=front-back, Z=left-right
+                    // This tilt positions the mesh so standard views work correctly
+                    const baseTilt = Math.PI - Math.PI / 6;  // ~150 degrees
+                    boneMesh.rotation.x = baseTilt;
 
                     scene.add(boneMesh);
 
@@ -1549,10 +1632,10 @@ HTML_TEMPLATE = '''
         }
 
         function onWindowResize() {
-            const container = document.getElementById('viewer3d');
-            camera.aspect = container.clientWidth / container.clientHeight;
+            const modelCell = document.getElementById('model-cell');
+            camera.aspect = modelCell.clientWidth / modelCell.clientHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setSize(modelCell.clientWidth, modelCell.clientHeight);
         }
 
         function animate() {
@@ -1560,6 +1643,63 @@ HTML_TEMPLATE = '''
             controls.update();
             renderer.render(scene, camera);
         }
+
+        // Expanded view functionality
+        let currentExpandedAxis = null;
+        const viewInfo = {
+            'axial': { color: '#4fc3f7', title: 'Axial (Top-Down)' },
+            'sagittal': { color: '#ff6b6b', title: 'Sagittal (Side)' },
+            'coronal': { color: '#6bff6b', title: 'Coronal (Front)' }
+        };
+
+        function expandView(axis) {
+            currentExpandedAxis = axis;
+            const overlay = document.getElementById('expanded-overlay');
+            const info = viewInfo[axis];
+
+            document.getElementById('expanded-color').style.background = info.color;
+            document.getElementById('expanded-title-text').textContent = info.title;
+
+            const slider = document.getElementById(axis + '-slider');
+            const expandedSlider = document.getElementById('expanded-slider');
+            expandedSlider.max = slider.max;
+            expandedSlider.value = slider.value;
+
+            document.getElementById('expanded-pos').textContent = slider.value;
+            document.getElementById('expanded-img').src = document.getElementById(axis + '-img').src;
+
+            overlay.classList.add('show');
+
+            expandedSlider.oninput = function() {
+                const idx = this.value;
+                document.getElementById('expanded-pos').textContent = idx;
+                document.getElementById(axis + '-slider').value = idx;
+                updateSlice(axis, idx);
+                // Update expanded image directly
+                fetch(`/slice/${axis}/${idx}?wc=${windowCenter}&ww=${windowWidth}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('expanded-img').src = 'data:image/png;base64,' + data.image;
+                    });
+                updatePlaneHelpers(
+                    parseInt(document.getElementById('axial-slider').value),
+                    parseInt(document.getElementById('coronal-slider').value),
+                    parseInt(document.getElementById('sagittal-slider').value)
+                );
+            };
+        }
+
+        function closeExpanded() {
+            document.getElementById('expanded-overlay').classList.remove('show');
+            currentExpandedAxis = null;
+        }
+
+        // Close expanded view with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && currentExpandedAxis) {
+                closeExpanded();
+            }
+        });
 
         init();
     </script>
